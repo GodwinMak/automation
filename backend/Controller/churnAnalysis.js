@@ -1,0 +1,478 @@
+const db = require("../Models");
+const { Op, fn, col, literal } = require("sequelize");
+
+const StatusChangeHistory = db.statusChangeHistories;
+
+/**
+ * Get status change history with filtering and pagination
+ */
+exports.getStatusChanges = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      pageSize = 20,
+      customerType,
+      interface: interfaceFilter,
+      fromStatus,
+      toStatus,
+      startDate,
+      endDate,
+      search,
+      nbr,
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(pageSize);
+    const whereClause = {};
+
+    if (customerType) whereClause.customerType = customerType;
+    if (interfaceFilter) whereClause.interface = { [Op.like]: `%${interfaceFilter}%` };
+    if (fromStatus) whereClause.previousStatus = fromStatus;
+    if (toStatus) whereClause.newStatus = toStatus;
+    if (nbr) whereClause.nbr = { [Op.like]: `%${nbr}%` };
+
+    if (startDate || endDate) {
+      whereClause.changedAt = {};
+      if (startDate) whereClause.changedAt[Op.gte] = new Date(startDate);
+      if (endDate) whereClause.changedAt[Op.lte] = new Date(endDate);
+    }
+
+    if (search) {
+      whereClause[Op.or] = [
+        { customerName: { [Op.like]: `%${search}%` } },
+        { interface: { [Op.like]: `%${search}%` } },
+        { cid: { [Op.like]: `%${search}%` } },
+      ];
+    }
+
+    const { count, rows } = await StatusChangeHistory.findAndCountAll({
+      where: whereClause,
+      order: [["changedAt", "DESC"]],
+      offset,
+      limit: parseInt(pageSize),
+    });
+
+    res.json({
+      data: rows,
+      totalItems: count,
+      totalPages: Math.ceil(count / parseInt(pageSize)),
+      currentPage: parseInt(page),
+    });
+  } catch (error) {
+    console.error("Error fetching status changes:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Get customers with frequent status changes (unstable customers)
+ * These are potential churn risks
+ */
+exports.getUnstableCustomers = async (req, res) => {
+  try {
+    const { days = 30, minChanges = 3, customerType } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+
+    const whereClause = {
+      changedAt: { [Op.gte]: startDate },
+    };
+    if (customerType) whereClause.customerType = customerType;
+
+    const results = await StatusChangeHistory.findAll({
+      attributes: [
+        "interface",
+        "customerType",
+        "customerName",
+        "cid",
+        "nbr",
+        "switchName",
+        [fn("COUNT", col("id")), "changeCount"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downCount"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "upCount"],
+        [fn("MAX", col("changedAt")), "lastChange"],
+        [fn("AVG", col("durationInPreviousState")), "avgDowntimeSec"],
+      ],
+      where: whereClause,
+      group: ["interface", "customerType", "customerName", "cid", "nbr", "switchName"],
+      having: literal(`COUNT(id) >= ${parseInt(minChanges)}`),
+      order: [[literal("changeCount"), "DESC"]],
+      raw: true,
+    });
+
+    res.json({
+      period: `Last ${days} days`,
+      minChanges: parseInt(minChanges),
+      data: results.map((r) => ({
+        ...r,
+        avgDowntimeFormatted: formatDuration(r.avgDowntimeSec),
+        stabilityScore: calculateStabilityScore(r),
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching unstable customers:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Get customers who have been down for extended periods (high churn risk)
+ * This includes:
+ * 1. Customers with tracked status changes showing them as down
+ * 2. Customers currently down in main tables (even without tracking history)
+ */
+exports.getExtendedDowntimeCustomers = async (req, res) => {
+  try {
+    const { customerType } = req.query;
+    const now = new Date();
+    const results = [];
+    const seenInterfaces = new Set();
+
+    // ========== PART 1: Get from Status Change History ==========
+    // Find customers whose LAST status change was to "down"
+    const historyWhereClause = {};
+    if (customerType) historyWhereClause.customerType = customerType;
+
+    // Get all status changes, ordered by most recent first
+    const allChanges = await StatusChangeHistory.findAll({
+      where: historyWhereClause,
+      order: [["changedAt", "DESC"]],
+      raw: true,
+    });
+
+    // Group by interface and get the most recent status for each
+    const latestStatusByInterface = new Map();
+    for (const change of allChanges) {
+      const key = `${change.customerType}:${change.interface}`;
+      if (!latestStatusByInterface.has(key)) {
+        latestStatusByInterface.set(key, change);
+      }
+    }
+
+    // Filter to only those currently down
+    const trackedDown = Array.from(latestStatusByInterface.values())
+      .filter(record => record.newStatus === "down");
+
+    console.log(`[Churn] Found ${trackedDown.length} tracked customers currently down`);
+
+    for (const record of trackedDown) {
+      const downSince = new Date(record.changedAt);
+      const downtimeSeconds = Math.floor((now - downSince) / 1000);
+      results.push({
+        ...record,
+        downSince,
+        downtimeSeconds,
+        downtimeFormatted: formatDuration(downtimeSeconds),
+        churnRisk: calculateChurnRisk(downtimeSeconds),
+        source: "tracked", // We know when it went down
+      });
+      seenInterfaces.add(`${record.customerType}:${record.interface}`);
+    }
+
+    // ========== PART 2: Get from Main Tables (untracked) ==========
+    // Customers currently down but may not have tracking history
+    // (e.g., were down before tracking started)
+
+    const fetchFromTable = async (model, infoModel, type, interfaceField = "interface") => {
+      if (customerType && customerType !== type) return [];
+
+      const downCustomers = await model.findAll({
+        where: { operationalStatus: "down" },
+        attributes: ["interface", "switchName", "operationalStatus"],
+        raw: true,
+      });
+
+      const untrackedDown = [];
+      for (const c of downCustomers) {
+        const key = `${type}:${c.interface}`;
+        if (seenInterfaces.has(key)) continue; // Already in tracked results
+
+        // Get customer info
+        let customerInfo = {};
+        if (infoModel) {
+          const info = await infoModel.findOne({
+            where: { interface: c.interface },
+            attributes: ["customerName", "cid", "nbr"],
+            raw: true,
+          });
+          if (info) customerInfo = info;
+        }
+
+        untrackedDown.push({
+          interface: c.interface,
+          customerType: type,
+          switchName: c.switchName,
+          customerName: customerInfo.customerName || null,
+          cid: customerInfo.cid || null,
+          nbr: customerInfo.nbr || null,
+          previousStatus: "unknown",
+          newStatus: "down",
+          downSince: null, // Unknown - was down before tracking
+          downtimeSeconds: null,
+          downtimeFormatted: "Unknown (before tracking)",
+          churnRisk: "unknown",
+          source: "untracked", // Down since before tracking started
+        });
+        seenInterfaces.add(key);
+      }
+      return untrackedDown;
+    };
+
+    // Fetch from all three tables
+    const diaDown = await fetchFromTable(db.diacustomers, db.customerinfos, "DIA");
+    const iptDown = await fetchFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT");
+    const sharedDown = await fetchFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED");
+
+    results.push(...diaDown, ...iptDown, ...sharedDown);
+
+    // Sort: tracked (with known downtime) first by duration, then untracked
+    results.sort((a, b) => {
+      if (a.source === "tracked" && b.source === "untracked") return -1;
+      if (a.source === "untracked" && b.source === "tracked") return 1;
+      if (a.downtimeSeconds && b.downtimeSeconds) {
+        return b.downtimeSeconds - a.downtimeSeconds;
+      }
+      return 0;
+    });
+
+    res.json({
+      totalCurrentlyDown: results.length,
+      trackedCount: trackedDown.length,
+      untrackedCount: results.length - trackedDown.length,
+      data: results,
+    });
+  } catch (error) {
+    console.error("Error fetching extended downtime customers:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Get churn analysis summary statistics
+ */
+exports.getChurnSummary = async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+
+    // Total status changes
+    const totalChanges = await StatusChangeHistory.count({
+      where: { changedAt: { [Op.gte]: startDate } },
+    });
+
+    // Changes by type
+    const changesByType = await StatusChangeHistory.findAll({
+      attributes: [
+        "customerType",
+        [fn("COUNT", col("id")), "totalChanges"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "wentDown"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "cameUp"],
+      ],
+      where: { changedAt: { [Op.gte]: startDate } },
+      group: ["customerType"],
+      raw: true,
+    });
+
+    // Daily trend
+    const dailyTrend = await StatusChangeHistory.findAll({
+      attributes: [
+        [fn("DATE", col("changedAt")), "date"],
+        [fn("COUNT", col("id")), "changes"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "ups"],
+      ],
+      where: { changedAt: { [Op.gte]: startDate } },
+      group: [fn("DATE", col("changedAt"))],
+      order: [[fn("DATE", col("changedAt")), "ASC"]],
+      raw: true,
+    });
+
+    // Most affected NBRs
+    const mostAffectedNbrs = await StatusChangeHistory.findAll({
+      attributes: [
+        "nbr",
+        [fn("COUNT", col("id")), "changeCount"],
+        [fn("COUNT", fn("DISTINCT", col("interface"))), "uniqueCustomers"],
+      ],
+      where: {
+        changedAt: { [Op.gte]: startDate },
+        nbr: { [Op.ne]: null, [Op.ne]: "" },
+      },
+      group: ["nbr"],
+      order: [[literal("changeCount"), "DESC"]],
+      limit: 10,
+      raw: true,
+    });
+
+    // Unique customers affected
+    const uniqueAffected = await StatusChangeHistory.count({
+      distinct: true,
+      col: "interface",
+      where: { changedAt: { [Op.gte]: startDate } },
+    });
+
+    res.json({
+      period: `Last ${days} days`,
+      summary: {
+        totalChanges,
+        uniqueCustomersAffected: uniqueAffected,
+        changesByType,
+      },
+      dailyTrend,
+      mostAffectedNbrs,
+    });
+  } catch (error) {
+    console.error("Error fetching churn summary:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Get status change history for a specific customer
+ */
+exports.getCustomerHistory = async (req, res) => {
+  try {
+    const { interface: interfaceId, customerType } = req.params;
+    const { limit = 50 } = req.query;
+
+    const whereClause = { interface: interfaceId };
+    if (customerType) whereClause.customerType = customerType;
+
+    const history = await StatusChangeHistory.findAll({
+      where: whereClause,
+      order: [["changedAt", "DESC"]],
+      limit: parseInt(limit),
+    });
+
+    // Calculate statistics
+    const stats = await StatusChangeHistory.findOne({
+      attributes: [
+        [fn("COUNT", col("id")), "totalChanges"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "totalDowns"],
+        [fn("AVG", literal("CASE WHEN previousStatus = 'down' THEN durationInPreviousState ELSE NULL END")), "avgDowntimeSec"],
+        [fn("MAX", literal("CASE WHEN previousStatus = 'down' THEN durationInPreviousState ELSE 0 END")), "maxDowntimeSec"],
+      ],
+      where: whereClause,
+      raw: true,
+    });
+
+    res.json({
+      interface: interfaceId,
+      history,
+      stats: {
+        ...stats,
+        avgDowntimeFormatted: formatDuration(stats?.avgDowntimeSec || 0),
+        maxDowntimeFormatted: formatDuration(stats?.maxDowntimeSec || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching customer history:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Get hourly/daily pattern analysis
+ */
+exports.getPatternAnalysis = async (req, res) => {
+  try {
+    const { days = 30, customerType } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+
+    const whereClause = { changedAt: { [Op.gte]: startDate } };
+    if (customerType) whereClause.customerType = customerType;
+
+    // Hourly pattern
+    const hourlyPattern = await StatusChangeHistory.findAll({
+      attributes: [
+        [fn("HOUR", col("changedAt")), "hour"],
+        [fn("COUNT", col("id")), "changes"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
+      ],
+      where: whereClause,
+      group: [fn("HOUR", col("changedAt"))],
+      order: [[fn("HOUR", col("changedAt")), "ASC"]],
+      raw: true,
+    });
+
+    // Day of week pattern
+    const dayOfWeekPattern = await StatusChangeHistory.findAll({
+      attributes: [
+        [fn("DAYOFWEEK", col("changedAt")), "dayOfWeek"],
+        [fn("COUNT", col("id")), "changes"],
+        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
+      ],
+      where: whereClause,
+      group: [fn("DAYOFWEEK", col("changedAt"))],
+      order: [[fn("DAYOFWEEK", col("changedAt")), "ASC"]],
+      raw: true,
+    });
+
+    const dayNames = ["", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+    res.json({
+      period: `Last ${days} days`,
+      hourlyPattern: hourlyPattern.map((h) => ({
+        ...h,
+        hourFormatted: `${h.hour}:00`,
+      })),
+      dayOfWeekPattern: dayOfWeekPattern.map((d) => ({
+        ...d,
+        dayName: dayNames[d.dayOfWeek] || "Unknown",
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching pattern analysis:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Helper functions
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return "0s";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function calculateStabilityScore(record) {
+  // Lower score = more unstable
+  // Based on: number of changes, ratio of downs, average downtime
+  const changeCount = parseInt(record.changeCount) || 0;
+  const downCount = parseInt(record.downCount) || 0;
+  const avgDowntime = parseFloat(record.avgDowntimeSec) || 0;
+
+  let score = 100;
+  score -= changeCount * 5; // Penalize frequent changes
+  score -= (downCount / Math.max(changeCount, 1)) * 30; // Penalize high down ratio
+  score -= Math.min(avgDowntime / 3600, 30); // Penalize long downtimes (max 30 points)
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+// Churn risk thresholds (in seconds)
+const CHURN_THRESHOLDS = {
+  LOW: 3600,           // 1 hour
+  MEDIUM: 86400,       // 1 day
+  HIGH: 259200,        // 3 days
+  CRITICAL: 604800,    // 1 week
+  CHURNED: 1209600,    // 2 weeks - likely cancelled/churned
+};
+
+function calculateChurnRisk(downtimeSeconds) {
+  if (!downtimeSeconds || downtimeSeconds < 0) return "unknown";
+  if (downtimeSeconds < CHURN_THRESHOLDS.LOW) return "low";           // < 1 hour
+  if (downtimeSeconds < CHURN_THRESHOLDS.MEDIUM) return "medium";     // < 1 day
+  if (downtimeSeconds < CHURN_THRESHOLDS.HIGH) return "high";         // < 3 days
+  if (downtimeSeconds < CHURN_THRESHOLDS.CRITICAL) return "critical"; // < 1 week
+  if (downtimeSeconds < CHURN_THRESHOLDS.CHURNED) return "critical";  // < 2 weeks
+  return "churned"; // >= 2 weeks - customer has likely churned
+}
+

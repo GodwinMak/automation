@@ -1,0 +1,265 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Modern Dashboard Design System - Professional Network Management Theme */
+
+@layer base {
+  /* ===== LIGHT MODE ===== */
+  :root {
+    /* Core Background Colors - Clean White/Gray */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --muted-background: 210 40% 96%;
+    
+    /* Card System - Subtle shadows and clean borders */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --card-hover: 210 40% 98%;
+    
+    /* Interactive Elements */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    
+    /* Brand Colors - Vibrant Teal/Cyan */
+    --primary: 173 80% 40%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 173 85% 50%;
+    
+    /* Supporting Colors */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    
+    --accent: 173 80% 95%;
+    --accent-foreground: 173 80% 30%;
+    
+    /* Status Colors */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 76% 36%;
+    --warning: 38 92% 50%;
+    
+    /* UI Elements */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 173 80% 40%;
+
+    /* Radius & Spacing */
+    --radius: 0.75rem;
+    
+    /* Dashboard-specific tokens */
+    --dashboard-glow: 173 80% 40% / 0.15;
+    --card-shadow: 214 32% 91% / 0.5;
+    --nav-hover: 210 40% 96%;
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(173 80% 40%), hsl(173 85% 50%));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(210 40% 98%) 0%, hsl(210 40% 96%) 100%);
+    
+    /* Shadows */
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-card-hover: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-nav: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* Sidebar System - Light */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 173 80% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 40% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 173 80% 40%;
+
+    /* Chart Colors */
+    --chart-1: 173 80% 40%;
+    --chart-2: 340 75% 55%;
+    --chart-3: 47 95% 53%;
+    --chart-4: 262 83% 58%;
+    --chart-5: 12 76% 61%;
+  }
+
+  /* ===== DARK MODE ===== */
+  .dark {
+    /* Core Background Colors - Rich Dark Blues */
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --muted-background: 217 33% 17%;
+    
+    /* Card System */
+    --card: 217 33% 17%;
+    --card-foreground: 210 40% 98%;
+    --card-hover: 215 28% 20%;
+    
+    /* Interactive Elements */
+    --popover: 217 33% 17%;
+    --popover-foreground: 210 40% 98%;
+    
+    /* Brand Colors - Vibrant Teal/Cyan (brighter in dark mode) */
+    --primary: 173 80% 50%;
+    --primary-foreground: 222 47% 11%;
+    --primary-glow: 173 90% 60%;
+    
+    /* Supporting Colors */
+    --secondary: 215 28% 20%;
+    --secondary-foreground: 210 40% 98%;
+    
+    --muted: 215 28% 20%;
+    --muted-foreground: 215 20% 65%;
+    
+    --accent: 215 28% 20%;
+    --accent-foreground: 173 80% 50%;
+    
+    /* Status Colors */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 70% 45%;
+    --warning: 47 95% 53%;
+    
+    /* UI Elements */
+    --border: 215 28% 25%;
+    --input: 215 28% 25%;
+    --ring: 173 80% 50%;
+
+    /* Dashboard-specific tokens */
+    --dashboard-glow: 173 80% 50% / 0.2;
+    --card-shadow: 0 0% 0% / 0.3;
+    --nav-hover: 215 28% 20%;
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(173 80% 50%), hsl(173 90% 60%));
+    --gradient-card: linear-gradient(145deg, hsl(217 33% 17%) 0%, hsl(215 28% 20%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(222 47% 11%) 0%, hsl(217 33% 17%) 100%);
+    
+    /* Shadows */
+    --shadow-card: 0 4px 12px -2px rgb(0 0 0 / 0.4);
+    --shadow-card-hover: 0 8px 25px -5px rgb(0 0 0 / 0.5), 0 0 20px -5px hsl(173 80% 50% / 0.15);
+    --shadow-nav: 0 2px 8px -2px rgb(0 0 0 / 0.3);
+
+    /* Sidebar System - Dark */
+    --sidebar-background: 217 33% 17%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 173 80% 50%;
+    --sidebar-primary-foreground: 222 47% 11%;
+    --sidebar-accent: 215 28% 20%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 28% 25%;
+    --sidebar-ring: 173 80% 50%;
+
+    /* Chart Colors */
+    --chart-1: 173 80% 50%;
+    --chart-2: 340 75% 60%;
+    --chart-3: 47 95% 53%;
+    --chart-4: 262 83% 65%;
+    --chart-5: 12 76% 61%;
+  }
+}
+
+/* Dashboard Component Classes */
+@layer components {
+  .dashboard-card {
+    @apply bg-card border border-border rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 hover:border-primary/30;
+  }
+  
+  .nav-link {
+    @apply relative flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-foreground hover:bg-accent;
+  }
+  
+  .nav-link.active {
+    @apply bg-primary text-primary-foreground shadow-md;
+  }
+  
+  .nav-link.active::before {
+    @apply content-[''] absolute -left-1 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary;
+  }
+  
+  .hover-lift {
+    @apply transition-transform duration-200 hover:-translate-y-1 hover:shadow-lg;
+  }
+
+  .glass-effect {
+    @apply bg-background/80 backdrop-blur-md border border-border/50;
+  }
+
+  .gradient-border {
+    @apply relative before:absolute before:inset-0 before:rounded-xl before:p-[1px] before:bg-gradient-to-r before:from-primary before:to-primary-glow before:-z-10;
+  }
+
+  .status-up {
+    @apply bg-success/10 text-success border border-success/20;
+  }
+
+  .status-down {
+    @apply bg-destructive/10 text-destructive border border-destructive/20;
+  }
+
+  .stat-card {
+    @apply bg-card border border-border rounded-xl p-6 hover:shadow-lg transition-all duration-300 hover:border-primary/30;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted/50 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
+  }
+
+  /* Focus styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4); }
+  50% { box-shadow: 0 0 20px 5px hsl(var(--primary) / 0.2); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
