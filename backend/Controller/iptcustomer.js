@@ -1,9 +1,10 @@
 const db = require("../Models");
 const IptCustomerInfo = db.iptcustomerinfos;
 const IptCustomer = db.iptcustomers;
+const ClientDb = db.client_dbs;
 const Sequelize = db.Sequelize;
 
-// Get single IPT customer by ID
+// Get single IPT customer by ID (with client_db)
 exports.getIptCustomerById = async (req, res) => {
   const { id } = req.params;
 
@@ -13,6 +14,24 @@ exports.getIptCustomerById = async (req, res) => {
         {
           model: IptCustomer,
           attributes: ["operationalStatus", "adminStatus", "switchName", "destination", "description"],
+        },
+        {
+          model: ClientDb,
+          attributes: [
+            "area",
+            "email_address",
+            "medium_details",
+            "onnet_offnet",
+            "customer_name_pastel",
+            "phone_number",
+            "network_cid",
+            "provider",
+            "first_name",
+            "special_comments",
+            "revenue_head",
+            "new_customer_type",
+          ],
+          required: false,
         },
       ],
     });
@@ -63,6 +82,19 @@ exports.getAllIptCustomers = async (req, res) => {
             statusFilter && statusFilter !== "all"
               ? { operationalStatus: statusFilter }
               : undefined,
+        },
+        {
+          model: ClientDb,
+          attributes: [
+            "area",
+            "email_address",
+            "onnet_offnet",
+            "customer_name_pastel",
+            "phone_number",
+            "network_cid",
+            "provider",
+          ],
+          required: false,
         },
       ],
     });
@@ -158,27 +190,5 @@ exports.getNbrSummary = async (req, res) => {
   }
 };
 
-exports.getIptCustomerById = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const customer = await IptCustomerInfo.findByPk(id, {
-      include: [
-        {
-          model: IptCustomer,
-          attributes: ["operationalStatus", "switchName", "destination", "adminStatus"],
-        },
-      ],
-    });
-
-    if (!customer) {
-      return res.status(404).json({ message: "IPT Customer not found" });
-    }
-
-    res.status(200).json(customer);
-  } catch (error) {
-    console.error("Error fetching IPT customer by ID:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
+// Note: Duplicate getIptCustomerById removed - using the one at the top of the file
 

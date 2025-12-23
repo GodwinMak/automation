@@ -1,18 +1,30 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Network } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useLocation } from "react-router-dom";
 import { PRODUCTION_URL } from "@/utils/Api";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { Line } from "react-chartjs-2";
 import { useNavigate } from "react-router-dom";
+import CustomerMLAnalysis from "@/components/CustomerMLAnalysis";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -42,6 +54,8 @@ const ViewIptCustomer = () => {
   const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
   const [fetchingCustomer, setFetchingCustomer] = useState(false);
   const [customer, setCustomer] = useState<any>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
 
   // Detect if coming from Watchlist (flat data without nested iptcustomer)
   const isFromWatchlist = customerInfo?.customer && !customerInfo?.customer?.iptcustomer;
@@ -84,6 +98,62 @@ const ViewIptCustomer = () => {
     adminStatus: customer?.iptcustomer?.adminStatus || customer?.adminStatus,
     description: customer?.iptcustomer?.description || customer?.description,
     destination: customer?.iptcustomer?.destination || customer?.destination,
+  };
+
+  // Edit form data state
+  const [editData, setEditData] = useState({
+    email_address: "",
+    phone_number: "",
+    onnet_offnet: "onnet",
+    customer_name_pastel: "",
+    area: "",
+    first_name: "",
+    special_comments: "",
+    provider: "",
+  });
+
+  // Initialize edit form when customer data loads
+  useEffect(() => {
+    if (customer?.client_db) {
+      setEditData({
+        email_address: customer.client_db.email_address || "",
+        phone_number: customer.client_db.phone_number || "",
+        onnet_offnet: customer.client_db.onnet_offnet || "onnet",
+        customer_name_pastel: customer.client_db.customer_name_pastel || "",
+        area: customer.client_db.area || "",
+        first_name: customer.client_db.first_name || "",
+        special_comments: customer.client_db.special_comments || "",
+        provider: customer.client_db.provider || "",
+      });
+    }
+  }, [customer]);
+
+  // Handle edit form submission
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!customerData.cid) {
+      alert("CID is required to update client details");
+      return;
+    }
+
+    setEditLoading(true);
+    try {
+      await axios.put(`${PRODUCTION_URL}/client-db/${customerData.cid}`, editData);
+      
+      // Refresh customer data
+      if (customer?.id) {
+        const res = await axios.get(`${PRODUCTION_URL}/iptcustomers/${customer.id}`);
+        setCustomer(res.data);
+      }
+      
+      alert("Customer details updated successfully");
+      setIsEditModalOpen(false);
+    } catch (error: any) {
+      alert(error.response?.data?.message || "Update failed");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   // Map switch names to Zabbix host names
@@ -175,19 +245,71 @@ const ViewIptCustomer = () => {
       { label: "Description", value: customerData?.description || data?.iptcustomer?.description },
     ];
 
+    // Client DB info items
+    const clientDbItems = data?.client_db ? [
+      { label: "Pastel Name", value: data.client_db.customer_name_pastel },
+      { label: "Email Address", value: data.client_db.email_address },
+      { label: "Phone Number", value: data.client_db.phone_number },
+      { label: "Area", value: data.client_db.area },
+      { label: "Network Type", value: data.client_db.onnet_offnet?.toUpperCase() },
+      { label: "Provider", value: data.client_db.provider },
+      { label: "Contact Name", value: data.client_db.first_name },
+      { label: "Comments", value: data.client_db.special_comments },
+    ] : [];
+
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {infoItems.map((item, index) => (
-          <div
-            key={index}
-            className="bg-card border border-border rounded-lg p-4 hover:shadow-md transition-shadow"
-          >
-            <p className="text-sm text-muted-foreground mb-1">{item.label}</p>
-            <p className="text-lg font-semibold text-foreground">
-              {item.value || "N/A"}
-            </p>
+      <div className="space-y-8">
+        {/* Network Information */}
+        <div>
+          <h3 className="text-lg font-semibold text-foreground mb-4">Network Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {infoItems.map((item, index) => (
+              <div
+                key={index}
+                className="bg-card border border-border rounded-lg p-4 hover:shadow-md transition-shadow"
+              >
+                <p className="text-sm text-muted-foreground mb-1">{item.label}</p>
+                <p className="text-lg font-semibold text-foreground">
+                  {item.value || "N/A"}
+                </p>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+
+        {/* Client/Billing Information */}
+        <div>
+          <h3 className="text-lg font-semibold text-foreground mb-4">
+            Client/Billing Information
+            {!data?.client_db && (
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                (Not linked - Click "Edit Details" to add)
+              </span>
+            )}
+          </h3>
+          {clientDbItems.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {clientDbItems.map((item, index) => (
+                <div
+                  key={index}
+                  className="bg-card border border-blue-500/30 rounded-lg p-4 hover:shadow-md transition-shadow"
+                >
+                  <p className="text-sm text-blue-400 mb-1">{item.label}</p>
+                  <p className="text-lg font-semibold text-foreground">
+                    {item.value || "N/A"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-card border border-dashed border-border rounded-lg p-6 text-center">
+              <p className="text-muted-foreground">
+                No billing information linked to this customer.
+                Click "Edit Details" to add contact and billing information.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -232,6 +354,12 @@ const ViewIptCustomer = () => {
               nbr={customer?.nbr}
             />
             <Button
+              onClick={() => setIsEditModalOpen(true)}
+              className="bg-secondary hover:bg-secondary/90 text-secondary-foreground font-semibold"
+            >
+              Edit Details
+            </Button>
+            <Button
               onClick={handleFetchGraph}
               disabled={graphLoading}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
@@ -266,6 +394,21 @@ const ViewIptCustomer = () => {
         </div>
 
         <IptCustomerInfo data={customer} customerData={customerData} />
+
+        {/* AI Analysis Section */}
+        {/* {customer?.id && (
+          <div className="mt-8">
+            <CustomerMLAnalysis
+              customerId={customer.id}
+              customerType="IPT"
+              customerName={customerData.customerName || ""}
+              switchName={customerData.switchName}
+              interfaceName={customer.interface}
+              upMbps={customer.capacity}
+              downMbps={customer.capacity}
+            />
+          </div>
+        )} */}
       </main>
 
       {/* Graph Modal */}
@@ -295,6 +438,137 @@ const ViewIptCustomer = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Edit Customer Details Modal */}
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Customer Details</DialogTitle>
+            <DialogDescription>
+              Update customer contact and billing information.
+              {!customer?.client_db && " This will create a new client record linked to this CID."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleEditSubmit} className="grid gap-4 py-4">
+            {/* Email */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Email</Label>
+              <Input
+                value={editData.email_address}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, email_address: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="customer@example.com"
+              />
+            </div>
+
+            {/* Phone */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Phone</Label>
+              <Input
+                value={editData.phone_number}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, phone_number: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="+255 XXX XXX XXX"
+              />
+            </div>
+
+            {/* Onnet / Offnet */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Network Type</Label>
+              <Select
+                value={editData.onnet_offnet}
+                onValueChange={(value) =>
+                  setEditData((p) => ({ ...p, onnet_offnet: value }))
+                }
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="onnet">Onnet</SelectItem>
+                  <SelectItem value="offnet">Offnet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Pastel Name */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Pastel Name</Label>
+              <Input
+                value={editData.customer_name_pastel}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, customer_name_pastel: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="Customer name in Pastel"
+              />
+            </div>
+
+            {/* Area */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Area</Label>
+              <Input
+                value={editData.area}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, area: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="e.g., Dar es Salaam"
+              />
+            </div>
+
+            {/* Contact Name */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Contact Name</Label>
+              <Input
+                value={editData.first_name}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, first_name: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="Contact person name"
+              />
+            </div>
+
+            {/* Provider */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Provider</Label>
+              <Input
+                value={editData.provider}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, provider: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="e.g., Liquid Telecom"
+              />
+            </div>
+
+            {/* Comments */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Comments</Label>
+              <Input
+                value={editData.special_comments}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, special_comments: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="Special notes or comments"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="submit" disabled={editLoading}>
+                {editLoading ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -309,7 +583,7 @@ const zabbixApi = async (payload) => {
       ...payload,
     },
     {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: undefined, },
     }
   );
   return res.data.result;

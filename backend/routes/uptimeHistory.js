@@ -6,15 +6,16 @@ const {
   getTypeComparison,
   triggerSnapshot,
 } = require("../Controller/uptimeHistory");
+const { verifyToken, requirePermission } = require("../middleware/auth");
 
 const router = require("express").Router();
 
-router.get("/24h", getLast24Hours);
-router.get("/weekly", getWeeklyTrend);
-router.get("/monthly", getMonthlyTrend);
-router.get("/summary", getSummaryStats);
-router.get("/comparison", getTypeComparison);
-router.post("/snapshot", triggerSnapshot);
+// Uptime trends routes - restricted for customer_relation
+router.get("/24h", verifyToken, requirePermission("canViewUptimeTrends"), getLast24Hours);
+router.get("/weekly", verifyToken, requirePermission("canViewUptimeTrends"), getWeeklyTrend);
+router.get("/monthly", verifyToken, requirePermission("canViewUptimeTrends"), getMonthlyTrend);
+router.get("/summary", verifyToken, requirePermission("canViewUptimeTrends"), getSummaryStats);
+router.get("/comparison", verifyToken, requirePermission("canViewUptimeTrends"), getTypeComparison);
+router.post("/snapshot", verifyToken, requirePermission("canViewUptimeTrends"), triggerSnapshot);
 
 module.exports = router;
-

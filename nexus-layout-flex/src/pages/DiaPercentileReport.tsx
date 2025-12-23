@@ -79,7 +79,7 @@ const zabbixApi = async (payload: any) => {
       ...payload,
     },
     {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": undefined, },
     }
   );
   return res.data.result;

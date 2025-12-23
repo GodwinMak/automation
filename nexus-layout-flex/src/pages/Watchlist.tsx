@@ -6,7 +6,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import { ReusableTable } from "@/components/Table";
 import { Button } from "@/components/ui/button";
@@ -288,7 +287,7 @@ const Watchlist = () => {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
           <Star className="h-8 w-8 text-yellow-500 fill-yellow-500" />
-          Watchlist
+          My Watchlist
         </h1>
         <p className="text-muted-foreground">
           Monitor your favorite customers and track their status in real-time.
@@ -459,4 +458,3 @@ const Watchlist = () => {
 };
 
 export default Watchlist;
-

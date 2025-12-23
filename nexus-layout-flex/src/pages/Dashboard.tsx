@@ -9,6 +9,7 @@ import { PRODUCTION_URL } from "@/utils/Api";
 import axios from "axios";
 import { Server, Users, Activity, ArrowUpCircle, ArrowDownCircle, Clock, Network, Globe, Share2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import MLInsights from "@/components/MLInsights";
 
 export default function Dashboard() {
   type StatsData = {
@@ -201,6 +202,8 @@ export default function Dashboard() {
           <StatCard key={stat.title} stat={stat} index={index} />
         ))}
       </div>
+      {/* AI Insights Section */}
+      {/* <MLInsights /> */}
 
       {/* DIA, IPT & Shared Customer Stats */}
       <div className="grid gap-6 lg:grid-cols-3">

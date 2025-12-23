@@ -18,6 +18,28 @@ module.exports = (sequelize, DataTypes) => {
         password:{
             type: DataTypes.STRING,
             allowNull: false,
+        },
+        fullName: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        role: {
+            type: DataTypes.ENUM('admin', 'operator', 'customer_relation'),
+            allowNull: false,
+            defaultValue: 'operator',
+        },
+        isActive: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: true,
+        },
+        lastLogin: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        createdBy: {
+            type: DataTypes.UUID,
+            allowNull: true,
         }
     })
 }

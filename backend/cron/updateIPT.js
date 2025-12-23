@@ -956,5 +956,3 @@ module.exports = (io) => {
     updateAggDevicesIPT,
   };
 };
-
-

@@ -27,6 +27,7 @@ import { CustomerInfo } from "@/components/CustomerInfo";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { Line } from "react-chartjs-2";
 import { useNavigate } from "react-router-dom";
+import CustomerMLAnalysis from "@/components/CustomerMLAnalysis";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -64,6 +65,7 @@ const ViewDiaCutomer = () => {
 
   // Detect if coming from Watchlist (flat data without nested diacustomer)
   const isFromWatchlist = customerInfo?.customer && !customerInfo?.customer?.diacustomer;
+  console.log("customerInfo", customerInfo);
 
 
 
@@ -209,6 +211,7 @@ const ViewDiaCutomer = () => {
     return hostMapping[switchName] || switchName;
   };
 
+
   const handleFetchGraph = async () => {
     try {
       setGraphLoading(true);
@@ -231,7 +234,6 @@ const ViewDiaCutomer = () => {
         id: 1,
         auth,
       });
-      console.log(host)
 
       const hostid = host[0]?.hostid;
       if (!hostid) throw new Error("Host ID not found");
@@ -259,11 +261,6 @@ const ViewDiaCutomer = () => {
       // Store itemids so ViewGraph page can reuse them
       localStorage.setItem("zabbix_itemids", JSON.stringify(itemids));
 
-
-      // console.log(itemids)
-
-      // store names for summary issue
-
       // Navigate to new page
       navigate("/view-graph", {
         state: {
@@ -271,7 +268,7 @@ const ViewDiaCutomer = () => {
           itemids,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       alert(err.message);
       setGraphLoading(false);
@@ -339,6 +336,7 @@ const ViewDiaCutomer = () => {
         </div>
       </header>
 
+      {/* <CustomerMLAnalysis customerId={customerInfo?.customer?.id} customerType="DIA" customerName={customerData.customerName}/> */}
       {/* Customer Info */}
       <main className="container mx-auto px-6 py-8">
         <div className="mb-6">
@@ -350,6 +348,21 @@ const ViewDiaCutomer = () => {
           </p>
         </div>
         <CustomerInfo data={customer} />
+
+        {/* AI Analysis Section */}
+        {/* {customer?.id && (
+          <div className="mt-8">
+            <CustomerMLAnalysis
+              customerId={customer.id}
+              customerType="DIA"
+              customerName={customerData.customerName || ""}
+              switchName={customerData.switchName}
+              interfaceName={customer.interface}
+              upMbps={customer.upmbps}
+              downMbps={customer.downmbps}
+            />
+          </div>
+        )} */}
       </main>
 
       {/* === Password Modal === */}
@@ -545,7 +558,7 @@ const ViewDiaCutomer = () => {
                 });
                 alert("Customer updated successfully");
                 setIsEditModalOpen(false);
-              } catch (error) {
+              } catch (error: any) {
                 alert(error.response?.data?.message || "Update failed");
               }
             }}
@@ -658,6 +671,7 @@ const ViewDiaCutomer = () => {
 export default ViewDiaCutomer;
 
 const zabbixApi = async (payload) => {
+  console.log(payload);
   const res = await axios.post(
     "https://monitoring.liquidtelecom.net/api_jsonrpc.php",
     {
@@ -665,7 +679,7 @@ const zabbixApi = async (payload) => {
       ...payload,
     },
     {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: undefined, },
     }
   );
   return res.data.result;

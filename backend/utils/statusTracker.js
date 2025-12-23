@@ -5,6 +5,7 @@
 
 const db = require("../Models");
 const StatusChangeHistory = db.statusChangeHistories;
+const { createStatusChangeNotification } = require("../Controller/notification");
 
 // In-memory cache to track last known status and timestamp per interface
 const statusCache = {
@@ -166,6 +167,29 @@ const trackStatusChanges = async (interfaces, customerType, customerInfoMap = {}
     try {
       await StatusChangeHistory.bulkCreate(changes);
       console.log(`[StatusTracker] Logged ${changes.length} status changes for ${customerType}`);
+      
+      // Trigger notifications for up -> down transitions
+      for (const change of changes) {
+        if (change.previousStatus === "up" && change.newStatus === "down") {
+          try {
+            const result = await createStatusChangeNotification({
+              customerId: change.customerId,
+              customerName: change.customerName,
+              customerType: change.customerType,
+              interface: change.interface,
+              cid: change.cid,
+              nbr: change.nbr,
+              previousStatus: change.previousStatus,
+              currentStatus: change.newStatus,
+            });
+            if (result.created > 0) {
+              console.log(`[StatusTracker] 🔔 Sent ${result.created} notifications for ${change.customerName} going down`);
+            }
+          } catch (notifyError) {
+            console.error(`[StatusTracker] Error sending notification:`, notifyError.message);
+          }
+        }
+      }
     } catch (error) {
       console.error(`[StatusTracker] Error logging changes:`, error.message);
     }

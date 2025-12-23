@@ -117,8 +117,11 @@ exports.getUnstableCustomers = async (req, res) => {
 /**
  * Get customers who have been down for extended periods (high churn risk)
  * This includes:
- * 1. Customers with tracked status changes showing them as down
+ * 1. Customers with tracked status changes showing them as down (verified against actual status)
  * 2. Customers currently down in main tables (even without tracking history)
+ * 
+ * IMPORTANT: We verify against the ACTUAL current status in main tables to avoid
+ * showing customers as "down" when they're actually "up" (e.g., if "up" event wasn't tracked)
  */
 exports.getExtendedDowntimeCustomers = async (req, res) => {
   try {
@@ -127,12 +130,39 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     const results = [];
     const seenInterfaces = new Set();
 
-    // ========== PART 1: Get from Status Change History ==========
+    // ========== STEP 1: Get ACTUAL current status from main tables ==========
+    // This is the source of truth for current status
+    const actualDownInterfaces = new Map(); // key: "TYPE:interface" -> { switchName, ... }
+
+    const getActualDownFromTable = async (model, type) => {
+      if (customerType && customerType !== type) return;
+      
+      const downCustomers = await model.findAll({
+        where: { operationalStatus: "down" },
+        attributes: ["interface", "switchName", "operationalStatus"],
+        raw: true,
+      });
+      
+      for (const c of downCustomers) {
+        const key = `${type}:${c.interface}`;
+        actualDownInterfaces.set(key, { ...c, customerType: type });
+      }
+    };
+
+    await Promise.all([
+      getActualDownFromTable(db.diacustomers, "DIA"),
+      getActualDownFromTable(db.iptcustomers, "IPT"),
+      getActualDownFromTable(db.sharedcustomers, "SHARED"),
+    ]);
+
+    console.log(`[Churn] Actual currently down interfaces: ${actualDownInterfaces.size}`);
+
+    // ========== STEP 2: Get from Status Change History (with verification) ==========
     // Find customers whose LAST status change was to "down"
+    // BUT only if they're ACTUALLY down in the main table
     const historyWhereClause = {};
     if (customerType) historyWhereClause.customerType = customerType;
 
-    // Get all status changes, ordered by most recent first
     const allChanges = await StatusChangeHistory.findAll({
       where: historyWhereClause,
       order: [["changedAt", "DESC"]],
@@ -148,15 +178,27 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       }
     }
 
-    // Filter to only those currently down
-    const trackedDown = Array.from(latestStatusByInterface.values())
-      .filter(record => record.newStatus === "down");
+    // Filter to only those:
+    // 1. Last recorded status was "down"
+    // 2. ACTUALLY down in main table (verified)
+    let trackedDownCount = 0;
+    let skippedBecauseActuallyUp = 0;
 
-    console.log(`[Churn] Found ${trackedDown.length} tracked customers currently down`);
+    for (const [key, record] of latestStatusByInterface.entries()) {
+      // Skip if last recorded status wasn't "down"
+      if (record.newStatus !== "down") continue;
 
-    for (const record of trackedDown) {
+      // VERIFY: Check if actually down in main table
+      if (!actualDownInterfaces.has(key)) {
+        // History says down, but main table says up - skip this!
+        skippedBecauseActuallyUp++;
+        console.log(`[Churn] Skipping ${record.interface} (${record.customerType}): history says down, but actually UP`);
+        continue;
+      }
+
       const downSince = new Date(record.changedAt);
       const downtimeSeconds = Math.floor((now - downSince) / 1000);
+      
       results.push({
         ...record,
         downSince,
@@ -165,25 +207,23 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
         churnRisk: calculateChurnRisk(downtimeSeconds),
         source: "tracked", // We know when it went down
       });
-      seenInterfaces.add(`${record.customerType}:${record.interface}`);
+      seenInterfaces.add(key);
+      trackedDownCount++;
     }
 
-    // ========== PART 2: Get from Main Tables (untracked) ==========
-    // Customers currently down but may not have tracking history
+    console.log(`[Churn] Tracked down (verified): ${trackedDownCount}, Skipped (actually up): ${skippedBecauseActuallyUp}`);
+
+    // ========== STEP 3: Get untracked customers from main tables ==========
+    // Customers currently down but no tracking history
     // (e.g., were down before tracking started)
 
-    const fetchFromTable = async (model, infoModel, type, interfaceField = "interface") => {
+    const fetchUntrackedFromTable = async (model, infoModel, type) => {
       if (customerType && customerType !== type) return [];
 
-      const downCustomers = await model.findAll({
-        where: { operationalStatus: "down" },
-        attributes: ["interface", "switchName", "operationalStatus"],
-        raw: true,
-      });
-
       const untrackedDown = [];
-      for (const c of downCustomers) {
-        const key = `${type}:${c.interface}`;
+      
+      for (const [key, c] of actualDownInterfaces.entries()) {
+        if (c.customerType !== type) continue;
         if (seenInterfaces.has(key)) continue; // Already in tracked results
 
         // Get customer info
@@ -217,10 +257,10 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       return untrackedDown;
     };
 
-    // Fetch from all three tables
-    const diaDown = await fetchFromTable(db.diacustomers, db.customerinfos, "DIA");
-    const iptDown = await fetchFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT");
-    const sharedDown = await fetchFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED");
+    // Fetch untracked from all three tables
+    const diaDown = await fetchUntrackedFromTable(db.diacustomers, db.customerinfos, "DIA");
+    const iptDown = await fetchUntrackedFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT");
+    const sharedDown = await fetchUntrackedFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED");
 
     results.push(...diaDown, ...iptDown, ...sharedDown);
 
@@ -236,8 +276,9 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
 
     res.json({
       totalCurrentlyDown: results.length,
-      trackedCount: trackedDown.length,
-      untrackedCount: results.length - trackedDown.length,
+      trackedCount: trackedDownCount,
+      untrackedCount: results.length - trackedDownCount,
+      skippedBecauseActuallyUp, // For debugging
       data: results,
     });
   } catch (error) {

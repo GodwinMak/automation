@@ -161,7 +161,7 @@ const ViewGraph = () => {
           id: 1,
           auth,
         },
-        { headers: { "Content-Type": "application/json" } }
+        { headers: { "Content-Type": "application/json", Authorization: undefined, } }
       );
 
       const result = history.data.result;

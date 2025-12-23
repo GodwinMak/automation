@@ -43,6 +43,7 @@ db.favorites = require("./favorite.js")(sequelize, DataTypes);
 db.uptimehistories = require("./uptimeHistory.js")(sequelize, DataTypes);
 db.statusChangeHistories = require("./statusChangeHistory.js")(sequelize, DataTypes);
 db.percentileReports = require("./percentileReport.js")(sequelize, DataTypes);
+db.notifications = require("./notification.js")(sequelize, DataTypes);
 
 
 // Relations
@@ -78,12 +79,35 @@ db.sharedcustomerinfos.belongsTo(db.sharedcustomers, {
   targetKey: "interface",
   onDelete: "CASCADE",
 });
+// DIA Customers <-> Client DB
 db.customerinfos.hasOne(db.client_dbs,{
   foreignKey: "network_cid",
   sourceKey: "cid",
 });
 
 db.client_dbs.belongsTo(db.customerinfos,{
+  foreignKey: "network_cid",
+  targetKey: "cid",
+});
+
+// IPT Customers <-> Client DB
+db.iptcustomerinfos.hasOne(db.client_dbs, {
+  foreignKey: "network_cid",
+  sourceKey: "cid",
+});
+
+db.client_dbs.belongsTo(db.iptcustomerinfos, {
+  foreignKey: "network_cid",
+  targetKey: "cid",
+});
+
+// Shared Customers <-> Client DB
+db.sharedcustomerinfos.hasOne(db.client_dbs, {
+  foreignKey: "network_cid",
+  sourceKey: "cid",
+});
+
+db.client_dbs.belongsTo(db.sharedcustomerinfos, {
   foreignKey: "network_cid",
   targetKey: "cid",
 });
@@ -111,6 +135,23 @@ db.upgradeinfos.belongsTo(db.customerinfos,{
   onDelete: "CASCADE",
 })
 
+// User <-> Notifications
+db.users.hasMany(db.notifications, {
+  foreignKey: "userId",
+  onDelete: "CASCADE",
+});
+db.notifications.belongsTo(db.users, {
+  foreignKey: "userId",
+});
+
+// User <-> Favorites (watchlist)
+db.users.hasMany(db.favorites, {
+  foreignKey: "userId",
+  onDelete: "CASCADE",
+});
+db.favorites.belongsTo(db.users, {
+  foreignKey: "userId",
+});
 
 db.sequelize
   .sync({ force: false })

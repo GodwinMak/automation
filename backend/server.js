@@ -30,6 +30,8 @@ const capacityRoutes = require("./routes/capacity");
 const favoriteRoutes = require("./routes/favorite");
 const uptimeHistoryRoutes = require("./routes/uptimeHistory");
 const churnAnalysisRoutes = require("./routes/churnAnalysis");
+const notificationRoutes = require("./routes/notification");
+const exportRoutes = require("./routes/export");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -39,17 +41,23 @@ app.use("/iptcustomers", iptCustomerRoutes);
 app.use("/sharedcustomers", sharedCustomerRoutes);
 app.use("/users", userRoutes);
 app.use("/client", clientRoutes);
+app.use("/client-db", clientRoutes); // Also mount at /client-db for consistency
 app.use("/search", searchRoutes);
 app.use("/capacity", capacityRoutes);
 app.use("/favorites", favoriteRoutes);
 app.use("/uptime-history", uptimeHistoryRoutes);
 app.use("/churn-analysis", churnAnalysisRoutes);
+app.use("/notifications", notificationRoutes);
 app.use("/percentile-reports", require("./routes/percentileReport.js"));
+app.use("/provisioning", require("./routes/provisioning.js"));
+// app.use("/ml", require("./routes/ml.js"));
+app.use("/export", exportRoutes);
 
 
 const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
 const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io);
 const { updateShared } = require("./cron/updateShared")(io);
+const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
 
 // Socket for SSH
 io.on("connection", (socket) => {
@@ -128,16 +136,28 @@ io.on("connection", (socket) => {
     console.log("========================================");
     console.log("🔥 Received manual 'updateShared' call from frontend.");
     console.log("========================================");
-    
+
     await updateShared();
-    
-    io.emit("sharedUpdateComplete"); 
+
+    io.emit("sharedUpdateComplete");
+  });
+
+  // Listener for manual cleanup of stale customers
+  socket.on("manualCleanupStaleCustomers", async () => {
+    console.log("========================================");
+    console.log("🧹 Received manual 'cleanupStaleCustomers' call from frontend.");
+    console.log("========================================");
+
+    await cleanupStaleCustomers();
+
+    io.emit("cleanupComplete");
   });
 });
 
-require("./cron/updateDIA")(io); 
+require("./cron/updateDIA")(io);
 require("./cron/updateIPT")(io);
 require("./cron/updateShared")(io);
+require("./cron/cleanupStaleCustomers")(io);
 require("./cron/uptimeTracker");
 
 // Initialize status tracker cache

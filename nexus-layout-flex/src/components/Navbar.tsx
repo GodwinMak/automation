@@ -34,6 +34,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { NotificationBell } from "@/components/NotificationBell";
 // Define the possible status types for clarity and consistency
 const UPDATE_STATUS = {
   IDLE: "idle",
@@ -253,51 +254,8 @@ export function Navbar() {
             <Upload className="h-4 w-4" />
           </Button>
 
-          {/* Notification Bell */}
-          <DropdownMenu onOpenChange={handleNotificationOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="relative h-9 w-9 hover:bg-accent transition-colors"
-              >
-                <Bell className="h-4 w-4" />
-                {/* Show badge only if there are unread notifications */}
-                {unreadCount > 0 && (
-                  <Badge
-                    variant="destructive"
-                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full p-0 text-[10px] font-semibold leading-none"
-                  >
-                    {unreadCount}
-                  </Badge>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-80" align="end">
-              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {notifications.length > 0 ? (
-                notifications.map((notif, index) => (
-                  <DropdownMenuItem
-                    key={index}
-                    className="flex flex-col items-start gap-1"
-                  >
-                    <p className="font-semibold text-destructive">
-                      🚨 Link Down: {notif.customerName}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {notif.interface} on {notif.switchName}
-                    </p>
-                    <p className="text-xs text-muted-foreground self-end">
-                      {new Date(notif.timestamp).toLocaleString()}
-                    </p>
-                  </DropdownMenuItem>
-                ))
-              ) : (
-                <DropdownMenuItem>No new notifications</DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Notification Bell - Uses database notifications */}
+          <NotificationBell />
 
           {/* User Profile */}
           <DropdownMenu>

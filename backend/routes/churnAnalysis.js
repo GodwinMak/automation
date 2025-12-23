@@ -8,25 +8,15 @@ const {
   getCustomerHistory,
   getPatternAnalysis,
 } = require("../Controller/churnAnalysis");
+const { verifyToken, requirePermission } = require("../middleware/auth");
 
-// Get all status changes with filtering and pagination
-router.get("/changes", getStatusChanges);
-
-// Get customers with frequent status changes (unstable/at risk)
-router.get("/unstable", getUnstableCustomers);
-
-// Get customers currently down for extended periods
-router.get("/extended-downtime", getExtendedDowntimeCustomers);
-
-// Get summary statistics for churn analysis
-router.get("/summary", getChurnSummary);
-
-// Get pattern analysis (hourly/daily trends)
-router.get("/patterns", getPatternAnalysis);
-
-// Get status history for a specific customer
-router.get("/customer/:interface", getCustomerHistory);
-router.get("/customer/:interface/:customerType", getCustomerHistory);
+// Churn analysis routes - restricted for customer_relation
+router.get("/changes", verifyToken, requirePermission("canViewChurnAnalysis"), getStatusChanges);
+router.get("/unstable", verifyToken, requirePermission("canViewChurnAnalysis"), getUnstableCustomers);
+router.get("/extended-downtime", verifyToken, requirePermission("canViewChurnAnalysis"), getExtendedDowntimeCustomers);
+router.get("/summary", verifyToken, requirePermission("canViewChurnAnalysis"), getChurnSummary);
+router.get("/patterns", verifyToken, requirePermission("canViewChurnAnalysis"), getPatternAnalysis);
+router.get("/customer/:interface", verifyToken, requirePermission("canViewChurnAnalysis"), getCustomerHistory);
+router.get("/customer/:interface/:customerType", verifyToken, requirePermission("canViewChurnAnalysis"), getCustomerHistory);
 
 module.exports = router;
-

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,10 +11,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { PRODUCTION_URL } from "@/utils/Api";
 import { useAuthContext } from "@/hooks/useAuthContext";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "@/components/ThemeProvider";
+import { useToast } from "@/hooks/use-toast";
 import axios from "axios";
 
 const username = import.meta.env.VITE_ZABBIX_USERNAME;
@@ -22,55 +22,76 @@ const password = import.meta.env.VITE_ZABBIX_PASSWORD;
 
 const Login = () => {
   const navigate = useNavigate();
-  const { dispatch } = useAuthContext();
+  const { state, login } = useAuthContext();
   const { theme, setTheme } = useTheme();
+  const { toast } = useToast();
   const [isSubmitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (state.userToken && !state.isLoading) {
+      navigate("/dashboard");
+    }
+  }, [state.userToken, state.isLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
     if (!form.email || !form.password) {
-      alert("Please fill all fields");
+      toast({
+        title: "Validation Error",
+        description: "Please fill all fields",
+        variant: "destructive",
+      });
       setSubmitting(false);
       return;
     }
 
     try {
-      const res = await axios.post(`${PRODUCTION_URL}/users/login`, {
-        email: form.email,
-        password: form.password,
+      await login(form.email, form.password);
+
+      // Login to Zabbix - Clear any existing auth first
+      try {
+        localStorage.removeItem("zabbixAuth"); // Clear old token before login
+        
+        const zabbix = await axios.post(
+          "https://monitoring.liquidtelecom.net/api_jsonrpc.php",
+          {
+            jsonrpc: "2.0",
+            method: "user.login",
+            params: {
+              username: username,
+              password: password,
+            },
+            id: 1,
+          },
+          {
+            headers: { "Content-Type": "application/json", Authorization: undefined, },
+          }
+        );
+        console.log(zabbix);
+        if (zabbix.data.result) {
+          localStorage.setItem("zabbixAuth", zabbix.data.result);
+        }
+      } catch (zabbixError) {
+        console.error("Zabbix login failed:", zabbixError);
+      }
+
+      toast({
+        title: "Welcome!",
+        description: "Login successful",
       });
 
-      localStorage.setItem("userToken", res.data.token);
-      localStorage.setItem("userData", JSON.stringify(res.data.user));
-      dispatch({ type: "SIGN_IN_TOKEN", payload: res.data.token });
-      dispatch({ type: "SIGN_IN_DATA", payload: res.data.user });
-
-      // Login to Zabbix
-      const zabbix = await axios.post(
-        "https://monitoring.liquidtelecom.net/api_jsonrpc.php",
-        {
-          jsonrpc: "2.0",
-          method: "user.login",
-          params: {
-            username: username,
-            password: password,
-          },
-          id: 1,
-        },
-        {
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-      localStorage.setItem("zabbixAuth", zabbix.data.result);
-
       navigate("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Login failed. Please check your credentials.");
+      toast({
+        title: "Login Failed",
+        description: error.message || "Please check your credentials.",
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -79,6 +100,15 @@ const Login = () => {
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
+
+  // Show loading if checking auth state
+  if (state.isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4 sm:px-6 relative overflow-hidden">

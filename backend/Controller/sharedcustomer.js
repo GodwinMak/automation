@@ -1,9 +1,10 @@
 const db = require("../Models");
 const SharedCustomerInfo = db.sharedcustomerinfos;
 const SharedCustomer = db.sharedcustomers;
+const ClientDb = db.client_dbs;
 const Sequelize = db.Sequelize;
 
-// Get single Shared customer by ID
+// Get single Shared customer by ID (with client_db)
 exports.getSharedCustomerById = async (req, res) => {
   const { id } = req.params;
 
@@ -13,6 +14,24 @@ exports.getSharedCustomerById = async (req, res) => {
         {
           model: SharedCustomer,
           attributes: ["operationalStatus", "adminStatus", "switchName", "description"],
+        },
+        {
+          model: ClientDb,
+          attributes: [
+            "area",
+            "email_address",
+            "medium_details",
+            "onnet_offnet",
+            "customer_name_pastel",
+            "phone_number",
+            "network_cid",
+            "provider",
+            "first_name",
+            "special_comments",
+            "revenue_head",
+            "new_customer_type",
+          ],
+          required: false,
         },
       ],
     });
@@ -63,6 +82,19 @@ exports.getAllSharedCustomers = async (req, res) => {
             statusFilter && statusFilter !== "all"
               ? { operationalStatus: statusFilter }
               : undefined,
+        },
+        {
+          model: ClientDb,
+          attributes: [
+            "area",
+            "email_address",
+            "onnet_offnet",
+            "customer_name_pastel",
+            "phone_number",
+            "network_cid",
+            "provider",
+          ],
+          required: false,
         },
       ],
     });
@@ -157,27 +189,5 @@ exports.getNbrSummary = async (req, res) => {
   }
 };
 
-exports.getSharedCustomerById = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const customer = await SharedCustomerInfo.findByPk(id, {
-      include: [
-        {
-          model: SharedCustomer,
-          attributes: ["operationalStatus", "switchName", "adminStatus", "description"],
-        },
-      ],
-    });
-
-    if (!customer) {
-      return res.status(404).json({ message: "Shared Customer not found" });
-    }
-
-    res.status(200).json(customer);
-  } catch (error) {
-    console.error("Error fetching Shared customer by ID:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-};
+// Note: Duplicate getSharedCustomerById removed - using the one at the top of the file
 

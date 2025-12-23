@@ -338,7 +338,7 @@ module.exports = (io) => {
   // Run immediately for testing
   // runAll();
 
-  return {
+  return {  
     updateShared,
   };
 }

@@ -80,7 +80,7 @@ const zabbixApi = async (payload: any) => {
       ...payload,
     },
     {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": undefined, },
     }
   );
   return res.data.result;
@@ -416,10 +416,10 @@ const IptPercentileReport = () => {
                 auth,
               });
 
+
               if (!host || !host[0]?.hostid) {
                 return null;
               }
-
               const graph = await zabbixApi({
                 method: "graph.get",
                 params: {

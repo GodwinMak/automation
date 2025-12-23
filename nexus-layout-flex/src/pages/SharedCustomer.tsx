@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { ReusableTable } from "@/components/Table";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Eye } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Eye, Download } from "lucide-react";
 import { useAuthContext } from "@/hooks/useAuthContext";
 import { PRODUCTION_URL } from "@/utils/Api";
 import {
@@ -35,6 +36,39 @@ const SharedCustomer = () => {
       : "all";
 
   const [statusFilter, setStatusFilter] = useState(initialFilter);
+
+  const handleExport = async () => {
+    try {
+      const params = new URLSearchParams({
+        status: statusFilter,
+        nbr: nbrSearch,
+        search: search
+      });
+
+      const response = await axios.get(
+        `${PRODUCTION_URL}/export/shared?${params}`,
+        { responseType: 'blob' }
+      );
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Generate filename
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      const filename = `shared_customers_${statusFilter || 'all'}_${timestamp}.xlsx`;
+
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Export failed. Please try again.');
+    }
+  };
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -142,6 +176,15 @@ const SharedCustomer = () => {
         }
         headerActions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              className="flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
             <input
               type="text"
               placeholder="Search customer..."
