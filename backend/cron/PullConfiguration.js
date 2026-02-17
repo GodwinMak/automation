@@ -6,7 +6,7 @@ require("dotenv").config({ path: "../.env" });
 
 const sshConfig = {
   username: "godwin.makyao",
-  password: "Namwel@842001!@#",
+  password: "Namwel200148#@!",
   // OPTIMIZATION 1: Add timeouts for connection stability
   readyTimeout: 10000, 
   keepaliveInterval: 10000,

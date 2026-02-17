@@ -20,6 +20,7 @@ import {
   MonitorCog,
   UserCog,
   Tag,
+  AlertTriangle,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -94,6 +95,18 @@ const allNavigationItems: NavigationItem[] = [
     title: "Capacity",
     url: "/capacity",
     icon: Gauge,
+    permission: "canViewCapacity",
+  },
+  {
+    title: "DIA Over-Usage",
+    url: "/dia-overusage-report",
+    icon: AlertTriangle,
+    permission: "canViewCapacity",
+  },
+  {
+    title: "Pitch For Upgrade",
+    url: "/pitch-for-upgrade",
+    icon: FileSpreadsheet,
     permission: "canViewCapacity",
   },
   {
@@ -283,7 +296,7 @@ export function AppSidebar() {
         {/* Main Navigation */}
         <SidebarGroup>
           <SidebarGroupLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">
-            DIA DASHBOARD
+            Network Automation System
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>

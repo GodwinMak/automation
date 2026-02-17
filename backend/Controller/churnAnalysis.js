@@ -2,6 +2,44 @@ const db = require("../Models");
 const { Op, fn, col, literal } = require("sequelize");
 
 const StatusChangeHistory = db.statusChangeHistories;
+const Favorites = db.favorites;
+
+// Map favorite customerType (DIA, IPT, Shared) to churn types (DIA, IPT, SHARED)
+const mapFavoriteTypeToChurnType = (type) => {
+  if (!type) return null;
+  if (type === "Shared") return "SHARED";
+  return type;
+};
+
+// Build a where-clause restriction for a user's watchlist (favorites)
+// so customer_relation sees only their own watchlist customers in churn views.
+const buildWatchlistWhereForUser = async (user) => {
+  if (!user || user.role !== "customer_relation") return null;
+
+  const favorites = await Favorites.findAll({
+    where: { userId: user.id },
+    attributes: ["interface", "customerType"],
+    raw: true,
+  });
+
+  if (!favorites.length) {
+    // No watchlist entries -> no results
+    return [];
+  }
+
+  const conditions = favorites
+    .map((f) => {
+      const mappedType = mapFavoriteTypeToChurnType(f.customerType);
+      if (!mappedType || !f.interface) return null;
+      return {
+        interface: f.interface,
+        customerType: mappedType,
+      };
+    })
+    .filter(Boolean);
+
+  return conditions;
+};
 
 /**
  * Get status change history with filtering and pagination
@@ -44,6 +82,22 @@ exports.getStatusChanges = async (req, res) => {
       ];
     }
 
+    // Restrict customer_relation to their watchlist
+    if (req.user?.role === "customer_relation") {
+      const watchlistConditions = await buildWatchlistWhereForUser(req.user);
+      if (watchlistConditions === null || watchlistConditions.length === 0) {
+        return res.json({
+          data: [],
+          totalItems: 0,
+          totalPages: 0,
+          currentPage: parseInt(page),
+        });
+      }
+
+      whereClause[Op.and] = whereClause[Op.and] || [];
+      whereClause[Op.and].push({ [Op.or]: watchlistConditions });
+    }
+
     const { count, rows } = await StatusChangeHistory.findAndCountAll({
       where: whereClause,
       order: [["changedAt", "DESC"]],
@@ -77,6 +131,21 @@ exports.getUnstableCustomers = async (req, res) => {
       changedAt: { [Op.gte]: startDate },
     };
     if (customerType) whereClause.customerType = customerType;
+
+    // Restrict customer_relation to their watchlist
+    if (req.user?.role === "customer_relation") {
+      const watchlistConditions = await buildWatchlistWhereForUser(req.user);
+      if (watchlistConditions === null || watchlistConditions.length === 0) {
+        return res.json({
+          period: `Last ${days} days`,
+          minChanges: parseInt(minChanges),
+          data: [],
+        });
+      }
+
+      whereClause[Op.and] = whereClause[Op.and] || [];
+      whereClause[Op.and].push({ [Op.or]: watchlistConditions });
+    }
 
     const results = await StatusChangeHistory.findAll({
       attributes: [
@@ -127,7 +196,7 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
   try {
     const { customerType } = req.query;
     const now = new Date();
-    const results = [];
+    let results = [];
     const seenInterfaces = new Set();
 
     // ========== STEP 1: Get ACTUAL current status from main tables ==========
@@ -264,6 +333,28 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
 
     results.push(...diaDown, ...iptDown, ...sharedDown);
 
+    // If customer_relation, filter to their watchlist only
+    if (req.user?.role === "customer_relation") {
+      const watchlistConditions = await buildWatchlistWhereForUser(req.user);
+      if (!watchlistConditions || watchlistConditions.length === 0) {
+        return res.json({
+          totalCurrentlyDown: 0,
+          trackedCount: 0,
+          untrackedCount: 0,
+          skippedBecauseActuallyUp,
+          data: [],
+        });
+      }
+
+      const allowedSet = new Set(
+        watchlistConditions.map((c) => `${c.customerType}:${c.interface}`)
+      );
+
+      results = results.filter((r) =>
+        allowedSet.has(`${r.customerType}:${r.interface}`)
+      );
+    }
+
     // Sort: tracked (with known downtime) first by duration, then untracked
     results.sort((a, b) => {
       if (a.source === "tracked" && b.source === "untracked") return -1;
@@ -296,9 +387,36 @@ exports.getChurnSummary = async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
+    const baseWhere = { changedAt: { [Op.gte]: startDate } };
+
+    // Restrict customer_relation to watchlist
+    let restrictedWhere = baseWhere;
+    if (req.user?.role === "customer_relation") {
+      const watchlistConditions = await buildWatchlistWhereForUser(req.user);
+      if (!watchlistConditions || watchlistConditions.length === 0) {
+        return res.json({
+          period: `Last ${days} days`,
+          summary: {
+            totalChanges: 0,
+            uniqueCustomersAffected: 0,
+            changesByType: [],
+          },
+          dailyTrend: [],
+          mostAffectedNbrs: [],
+        });
+      }
+
+      restrictedWhere = {
+        [Op.and]: [
+          baseWhere,
+          { [Op.or]: watchlistConditions },
+        ],
+      };
+    }
+
     // Total status changes
     const totalChanges = await StatusChangeHistory.count({
-      where: { changedAt: { [Op.gte]: startDate } },
+      where: restrictedWhere,
     });
 
     // Changes by type
@@ -309,7 +427,7 @@ exports.getChurnSummary = async (req, res) => {
         [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "wentDown"],
         [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "cameUp"],
       ],
-      where: { changedAt: { [Op.gte]: startDate } },
+      where: restrictedWhere,
       group: ["customerType"],
       raw: true,
     });
@@ -322,7 +440,7 @@ exports.getChurnSummary = async (req, res) => {
         [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
         [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "ups"],
       ],
-      where: { changedAt: { [Op.gte]: startDate } },
+      where: restrictedWhere,
       group: [fn("DATE", col("changedAt"))],
       order: [[fn("DATE", col("changedAt")), "ASC"]],
       raw: true,
@@ -336,7 +454,7 @@ exports.getChurnSummary = async (req, res) => {
         [fn("COUNT", fn("DISTINCT", col("interface"))), "uniqueCustomers"],
       ],
       where: {
-        changedAt: { [Op.gte]: startDate },
+        ...restrictedWhere,
         nbr: { [Op.ne]: null, [Op.ne]: "" },
       },
       group: ["nbr"],
@@ -349,7 +467,7 @@ exports.getChurnSummary = async (req, res) => {
     const uniqueAffected = await StatusChangeHistory.count({
       distinct: true,
       col: "interface",
-      where: { changedAt: { [Op.gte]: startDate } },
+      where: restrictedWhere,
     });
 
     res.json({

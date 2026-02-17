@@ -19,7 +19,7 @@ exports.globalSearch = async (req, res) => {
   try {
     const searchPattern = `%${query}%`;
 
-    // Search DIA Customers
+    // Search DIA Customers (include client_db fields)
     const diaResults = await CustomerInfo.findAll({
       where: {
         [Op.or]: [
@@ -27,6 +27,10 @@ exports.globalSearch = async (req, res) => {
           { cid: { [Op.like]: searchPattern } },
           { interface: { [Op.like]: searchPattern } },
           { nbr: { [Op.like]: searchPattern } },
+          // client_db fields (left-joined)
+          db.Sequelize.where(db.Sequelize.col('client_db.email_address'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.phone_number'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.customer_name_pastel'), { [Op.like]: searchPattern }),
         ],
       },
       include: [
@@ -34,11 +38,16 @@ exports.globalSearch = async (req, res) => {
           model: DiaCustomer,
           attributes: ["operationalStatus", "switchName"],
         },
+        {
+          model: db.client_dbs,
+          // attributes: [],
+          required: false,
+        },
       ],
       limit: limit,
     });
 
-    // Search IPT Customers
+    // Search IPT Customers (include client_db fields)
     const iptResults = await IptCustomerInfo.findAll({
       where: {
         [Op.or]: [
@@ -46,6 +55,9 @@ exports.globalSearch = async (req, res) => {
           { cid: { [Op.like]: searchPattern } },
           { interface: { [Op.like]: searchPattern } },
           { nbr: { [Op.like]: searchPattern } },
+          db.Sequelize.where(db.Sequelize.col('client_db.email_address'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.phone_number'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.customer_name_pastel'), { [Op.like]: searchPattern }),
         ],
       },
       include: [
@@ -53,11 +65,16 @@ exports.globalSearch = async (req, res) => {
           model: IptCustomer,
           attributes: ["operationalStatus", "switchName"],
         },
+        {
+          model: db.client_dbs,
+          // attributes: [],
+          required: false,
+        },
       ],
       limit: limit,
     });
 
-    // Search Shared Customers
+    // Search Shared Customers (include client_db fields)
     const sharedResults = await SharedCustomerInfo.findAll({
       where: {
         [Op.or]: [
@@ -65,12 +82,20 @@ exports.globalSearch = async (req, res) => {
           { cid: { [Op.like]: searchPattern } },
           { interface: { [Op.like]: searchPattern } },
           { nbr: { [Op.like]: searchPattern } },
+          db.Sequelize.where(db.Sequelize.col('client_db.email_address'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.phone_number'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.customer_name_pastel'), { [Op.like]: searchPattern }),
         ],
       },
       include: [
         {
           model: SharedCustomer,
           attributes: ["operationalStatus", "switchName"],
+        },
+        {
+          model: db.client_dbs,
+          // attributes: [],
+          required: false,
         },
       ],
       limit: limit,

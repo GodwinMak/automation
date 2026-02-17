@@ -84,11 +84,16 @@ exports.login = async (req, res) => {
     // Update last login
     await user.update({ lastLogin: new Date() });
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "24h" }
-    );
+    const payload = { userId: user.id, email: user.email, role: user.role };
+
+    // Special case: NOC monitoring user should have a non-expiring session
+    // so the NOC screen can stay logged in indefinitely.
+    let token;
+    if (user.email === "noc@liquidtech.co.tz") {
+      token = jwt.sign(payload, process.env.JWT_SECRET);
+    } else {
+      token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "24h" });
+    }
 
     res.status(200).send({
       message: "Login successful",
@@ -158,6 +163,8 @@ exports.updateProfile = async (req, res) => {
 
       const salt = await bcrypt.genSalt(Number(10));
       user.password = await bcrypt.hash(password, salt);
+      // record when the password was changed so existing tokens can be invalidated
+      user.passwordChangedAt = new Date();
     }
 
     if (fullName) {
@@ -168,6 +175,7 @@ exports.updateProfile = async (req, res) => {
 
     res.status(200).send({ 
       message: "Profile updated successfully",
+      passwordChanged: !!password,
       user: {
         id: user.id,
         username: user.username,
@@ -323,6 +331,8 @@ exports.updateById = async (req, res) => {
     if (password) {
       const salt = await bcrypt.genSalt(Number(10));
       user.password = await bcrypt.hash(password, salt);
+      // record admin-initiated password changes as well
+      user.passwordChangedAt = new Date();
     }
 
     if (fullName !== undefined) {

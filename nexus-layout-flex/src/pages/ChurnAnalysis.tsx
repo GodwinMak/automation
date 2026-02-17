@@ -260,11 +260,81 @@ export default function ChurnAnalysis() {
 
   const totalAtRiskPages = Math.ceil(filteredUnstable.length / PAGE_SIZE);
 
-  // Filter Extended Downtime by risk level
+  // Filter Extended Downtime by search + risk level
   const filteredDowntime = useMemo(() => {
-    if (!riskFilter) return extendedDowntime;
-    return extendedDowntime.filter(c => c.churnRisk === riskFilter);
-  }, [extendedDowntime, riskFilter]);
+    let base = extendedDowntime;
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      base = base.filter(
+        (c) =>
+          c.customerName?.toLowerCase().includes(query) ||
+          c.interface?.toLowerCase().includes(query) ||
+          c.nbr?.toLowerCase().includes(query) ||
+          c.cid?.toLowerCase().includes(query)
+      );
+    }
+
+    if (!riskFilter) return base;
+    return base.filter((c) => c.churnRisk === riskFilter);
+  }, [extendedDowntime, riskFilter, searchQuery]);
+
+  // Export Extended Downtime (filtered) to CSV/Excel
+  const handleExportExtendedDowntime = () => {
+    const data = filteredDowntime;
+    if (!data.length) {
+      toast.info("No extended downtime data to export");
+      return;
+    }
+
+    const headers = [
+      "Customer Name",
+      "Interface",
+      "Type",
+      "NBR",
+      "Switch",
+      "Down Since",
+      "Duration",
+      "Churn Risk",
+      "Source",
+    ];
+
+    const escapeCsv = (value: any) => {
+      if (value === null || value === undefined) return "";
+      const str = String(value);
+      if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const rows = data.map((c) => [
+      c.customerName || "",
+      c.interface || "",
+      c.customerType || "",
+      c.nbr || "",
+      c.switchName || "",
+      c.downSince ? new Date(c.downSince).toLocaleString() : "Unknown",
+      c.downtimeFormatted || "",
+      c.churnRisk || "unknown",
+      c.source || "",
+    ]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map(escapeCsv).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `extended_downtime_${timeRange}d.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // Paginated data for Extended Downtime table
   const paginatedDowntime = useMemo(() => {
@@ -292,13 +362,26 @@ export default function ChurnAnalysis() {
     return counts;
   }, [extendedDowntime]);
 
+  // Filter History table by search
+  const filteredHistory = useMemo(() => {
+    if (!searchQuery) return recentChanges;
+    const query = searchQuery.toLowerCase();
+    return recentChanges.filter(
+      (c) =>
+        c.customerName?.toLowerCase().includes(query) ||
+        c.interface?.toLowerCase().includes(query) ||
+        c.nbr?.toLowerCase().includes(query) ||
+        c.cid?.toLowerCase().includes(query)
+    );
+  }, [recentChanges, searchQuery]);
+
   // Paginated data for History table
   const paginatedHistory = useMemo(() => {
     const start = (historyPage - 1) * PAGE_SIZE;
-    return recentChanges.slice(start, start + PAGE_SIZE);
-  }, [recentChanges, historyPage]);
+    return filteredHistory.slice(start, start + PAGE_SIZE);
+  }, [filteredHistory, historyPage]);
 
-  const totalHistoryPages = Math.ceil(recentChanges.length / PAGE_SIZE);
+  const totalHistoryPages = Math.ceil(filteredHistory.length / PAGE_SIZE);
 
   // Summary stats cards
   const statsCards = useMemo(() => {
@@ -439,7 +522,7 @@ export default function ChurnAnalysis() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger className="w-[140px]">
               <Calendar className="h-4 w-4 mr-2" />
@@ -466,6 +549,17 @@ export default function ChurnAnalysis() {
               <SelectItem value="SHARED">Shared</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Global search across churn data */}
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search customers, interfaces, NBR or CID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
 
           <Button variant="outline" size="icon" onClick={fetchData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -656,17 +750,6 @@ export default function ChurnAnalysis() {
                     Customers with frequent status changes (3+ changes in selected period)
                   </CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search customers..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9 w-[250px]"
-                    />
-                  </div>
-                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -796,7 +879,18 @@ export default function ChurnAnalysis() {
                       Clear filter ✕
                     </Button>
                   )}
+                  {/* <div className="mt-2"> */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-5 px-2 text-xs py-4 ring-2 ring-purple-400 ring-offset-2 ring-offset-background "
+                    onClick={handleExportExtendedDowntime}
+                  >
+                    Export Excel
+                  </Button>
+                {/* </div> */}
                 </div>
+                
                 {riskFilter && (
                   <p className="text-sm font-medium">
                     Showing {filteredDowntime.length} customers with {riskFilter.toUpperCase()} risk

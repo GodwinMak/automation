@@ -659,7 +659,7 @@ exports.upgradeCustomer = async (req, res) => {
 exports.rescheduleJobs = async () => {
   const sshConfig = {
     username: "godwin.makyao",
-    password: "Namwel@842001!#@",
+    password: "Namwel200148#@!",
   };
   try {
     const temporaryUpgrades = await customerinfos.findAll({

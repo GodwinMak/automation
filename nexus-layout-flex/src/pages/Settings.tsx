@@ -15,11 +15,13 @@ import axios from "axios";
 import { useAuthContext } from "@/hooks/useAuthContext";
 import { PRODUCTION_URL } from "@/utils/Api";
 import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Settings() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("userData"));
-  const { dispatch } = useAuthContext();
+  const { dispatch, logout } = useAuthContext();
+  const { toast } = useToast();
 
   const [userDetails, setUserDetails] = useState({
     full_name: user.username || "",
@@ -87,14 +89,30 @@ export default function Settings() {
     if (!isUserChanged) return;
     try {
       setLoadingUser(true);
-      const res = await axios.put(
-        `${PRODUCTION_URL}/user/${user.id}`,
-        userDetails
-      );
-      localStorage.setItem("userData", JSON.stringify(res.data.user));
-      dispatch({ type: "SIGN_IN_TOKEN", payload: res.data.token });
-    } catch (error) {
-      console.log(error.response.data.message);
+      const res = await axios.put(`${PRODUCTION_URL}/users/profile`, {
+        fullName: userDetails.full_name,
+        email: userDetails.email,
+      });
+
+      const updatedUser = res.data.user;
+      if (updatedUser) {
+        localStorage.setItem("userData", JSON.stringify(updatedUser));
+        dispatch({ type: "SIGN_IN_DATA", payload: updatedUser });
+      }
+
+      toast({
+        title: "Profile updated",
+        description: "Your account information has been updated.",
+      });
+    } catch (error: any) {
+      console.error(error);
+      toast({
+        title: "Update failed",
+        description:
+          error?.response?.data?.message ||
+          "Could not update your account information.",
+        variant: "destructive",
+      });
     } finally {
       setLoadingUser(false);
     }
@@ -107,17 +125,45 @@ export default function Settings() {
 
     try {
       setLoadingPass(true);
-      await axios.put(`${PRODUCTION_URL}/users/${user.id}`, {
+      const res = await axios.put(`${PRODUCTION_URL}/users/profile`, {
+        currentPassword: secrety.currentPassword,
         password: secrety.newPassword,
       });
-      alert("Password Update is Done");
 
-      localStorage.removeItem("userToken");
-      localStorage.removeItem("userData");
-      // dispatch({ type: "SIGN_OUT" });
+      const passwordChanged = res.data?.passwordChanged;
+
+      toast({
+        title: "Password updated",
+        description: passwordChanged
+          ? "Your password has been changed. Please log in again with your new password."
+          : "Your password has been updated.",
+      });
+
+      // Log the user out so they must sign in with the new password
+      logout();
       navigate("/");
+
       // reset fields
       setSecrety({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (error: any) {
+      console.error(error);
+
+      const message = error?.response?.data?.message;
+
+      toast({
+        title: "Password update failed",
+        description:
+          message ||
+          "Could not update your password. Please check your current password and try again.",
+        variant: "destructive",
+      });
+
+      // If token is invalid or expired (including after a password change elsewhere),
+      // force logout and redirect to login.
+      if (error?.response?.status === 401) {
+        logout();
+        navigate("/");
+      }
     } finally {
       setLoadingPass(false);
     }

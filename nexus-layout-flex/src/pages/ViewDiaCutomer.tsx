@@ -26,8 +26,6 @@ import { PRODUCTION_URL } from "@/utils/Api";
 import { CustomerInfo } from "@/components/CustomerInfo";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { Line } from "react-chartjs-2";
-import { useNavigate } from "react-router-dom";
-import CustomerMLAnalysis from "@/components/CustomerMLAnalysis";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -36,6 +34,7 @@ import {
   LineElement,
   Tooltip,
   Legend,
+  Title,
 } from "chart.js";
 
 ChartJS.register(
@@ -44,11 +43,168 @@ ChartJS.register(
   PointElement,
   LineElement,
   Tooltip,
-  Legend
+  Legend,
+  Title
 );
+import { useNavigate } from "react-router-dom";
+import CustomerMLAnalysis from "@/components/CustomerMLAnalysis";
+
 
 const ViewDiaCutomer = () => {
   const navigate = useNavigate();
+
+  // Diagnosis Modal State and Handler (must be inside component)
+  const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [diagnosisResult, setDiagnosisResult] = useState<any>(null);
+  const [diagnosisError, setDiagnosisError] = useState("");
+
+  // Uptime modal state
+  const [isUptimeModalOpen, setIsUptimeModalOpen] = useState(false);
+  const [uptimeStartDate, setUptimeStartDate] = useState("");
+  const [uptimeLoading, setUptimeLoading] = useState(false);
+  const [uptimeError, setUptimeError] = useState("");
+  const [uptimeResult, setUptimeResult] = useState<any>(null);
+
+  const formatDisplayDate = (isoString: string | undefined) => {
+    if (!isoString) return "-";
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return d.toLocaleDateString("en-GB"); // dd/mm/yyyy
+  };
+
+  const handleDiagnosis = async () => {
+    setDiagnosisResult(null);
+    setDiagnosisError("");
+    setDiagnosisLoading(true);
+    setIsDiagnosisModalOpen(true); // Open modal immediately so loading shows
+    try {
+      const res = await axios.post(`${PRODUCTION_URL}/diagnosis`, {
+        interfaceName: customerData.interface,
+      });
+      setDiagnosisResult(res.data);
+    } catch (err: any) {
+      setDiagnosisError(
+        err.response?.data?.message || err.message || "Diagnosis failed."
+      );
+    } finally {
+      setDiagnosisLoading(false);
+    }
+  };
+
+  const handleOpenUptimeModal = () => {
+    // Default to 7 days ago, but enforce 90-day window via input attrs/backend
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const defaultDate = sevenDaysAgo.toISOString().split("T")[0]; // yyyy-mm-dd for native date input
+    setUptimeStartDate(defaultDate);
+    setUptimeResult(null);
+    setUptimeError("");
+    setIsUptimeModalOpen(true);
+  };
+
+  const handleCheckUptime = async () => {
+    try {
+      setUptimeError("");
+      setUptimeResult(null);
+
+      if (!uptimeStartDate) {
+        setUptimeError("Please select a start date.");
+        return;
+      }
+
+      let startDateObj: Date | null = null;
+
+      // Support both manual dd/mm/yyyy and native yyyy-mm-dd
+      if (uptimeStartDate.includes("/")) {
+        const parts = uptimeStartDate.split("/");
+        if (parts.length !== 3) {
+          setUptimeError("Date must be in format dd/mm/yyyy.");
+          return;
+        }
+
+        const [dayStr, monthStr, yearStr] = parts;
+        const day = Number(dayStr);
+        const month = Number(monthStr);
+        const year = Number(yearStr);
+
+        if (!day || !month || !year) {
+          setUptimeError("Invalid date. Please use dd/mm/yyyy.");
+          return;
+        }
+
+        startDateObj = new Date(year, month - 1, day);
+      } else if (uptimeStartDate.includes("-")) {
+        // Native date input value: yyyy-mm-dd
+        const [yearStr, monthStr, dayStr] = uptimeStartDate.split("-");
+        const year = Number(yearStr);
+        const month = Number(monthStr);
+        const day = Number(dayStr);
+
+        if (!day || !month || !year) {
+          setUptimeError("Invalid date selected.");
+          return;
+        }
+
+        startDateObj = new Date(year, month - 1, day);
+      }
+
+      if (!startDateObj) {
+        setUptimeError("Invalid date.");
+        return;
+      }
+      if (isNaN(startDateObj.getTime())) {
+        setUptimeError("Invalid date. Please use dd/mm/yyyy.");
+        return;
+      }
+
+      const now = new Date();
+      const diffMs = now.getTime() - startDateObj.getTime();
+      const maxRangeMs = 90 * 24 * 60 * 60 * 1000;
+
+      if (diffMs < 0) {
+        setUptimeError("Start date cannot be in the future.");
+        return;
+      }
+
+      if (diffMs > maxRangeMs) {
+        setUptimeError("Range cannot exceed 90 days from today.");
+        return;
+      }
+
+      // Backend expects ISO yyyy-mm-dd, but we must avoid timezone shifts
+      // so we build the date string manually instead of using toISOString().
+      let isoStartDate = "";
+      if (uptimeStartDate.includes("/")) {
+        // dd/mm/yyyy -> yyyy-mm-dd
+        const [dayStr, monthStr, yearStr] = uptimeStartDate.split("/");
+        isoStartDate = `${yearStr.padStart(4, "0")}-${monthStr.padStart(2, "0")}-${dayStr.padStart(2, "0")}`;
+      } else {
+        // Native date input already gives yyyy-mm-dd
+        isoStartDate = uptimeStartDate;
+      }
+
+      setUptimeLoading(true);
+
+      const res = await axios.post(`${PRODUCTION_URL}/diagnosis/uptime`, {
+        interfaceName: customerData.interface,
+        startDate: isoStartDate,
+      });
+
+      setUptimeResult(res.data);
+    } catch (err: any) {
+      setUptimeError(
+        err?.response?.data?.message || err.message || "Failed to calculate uptime."
+      );
+    } finally {
+      setUptimeLoading(false);
+    }
+  };
+
+  const handleDownloadUptimePdf = () => {
+    // Use browser print dialog; user can choose "Save as PDF"
+    window.print();
+  };
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -65,18 +221,17 @@ const ViewDiaCutomer = () => {
 
   // Detect if coming from Watchlist (flat data without nested diacustomer)
   const isFromWatchlist = customerInfo?.customer && !customerInfo?.customer?.diacustomer;
-  console.log("customerInfo", customerInfo);
+  const isFromOverusage = !!customerInfo?.fromOverusage && !!customerInfo?.interface;
+  const isFromPitch = !!customerInfo?.fromPitch && !!customerInfo?.interface;
 
 
 
-  // Fetch full customer data if coming from Watchlist
+  // Fetch full customer data if coming from Watchlist, Over-Usage, or Pitch For Upgrade report
   useEffect(() => {
     const fetchFullCustomer = async () => {
       if (isFromWatchlist && customerInfo?.customer?.customerId) {
         setFetchingCustomer(true);
         try {
-  console.log(isFromWatchlist);
-
           const res = await axios.get(
             `${PRODUCTION_URL}/customers/${customerInfo.customer.customerId}`
           );
@@ -88,12 +243,28 @@ const ViewDiaCutomer = () => {
         } finally {
           setFetchingCustomer(false);
         }
+      } else if ((isFromOverusage || isFromPitch) && customerInfo?.interface) {
+        setFetchingCustomer(true);
+        try {
+          const res = await axios.get(
+            `${PRODUCTION_URL}/customers/by-interface/${encodeURIComponent(
+              customerInfo.interface
+            )}`
+          );
+          setCustomer(res.data);
+        } catch (err) {
+          console.error("Error fetching customer by interface:", err);
+          setCustomer(null);
+        } finally {
+          setFetchingCustomer(false);
+        }
       } else {
         setCustomer(customerInfo?.customer);
+        console.log("One",customerInfo)
       }
     };
     fetchFullCustomer();
-  }, [customerInfo, isFromWatchlist]);
+  }, [customerInfo, isFromWatchlist, isFromOverusage, isFromPitch]);
 
   // Handle customer data from different sources (DIA list vs Watchlist)
   const customerData = {
@@ -190,12 +361,31 @@ const ViewDiaCutomer = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const [editData, setEditData] = useState({
-    email: customer?.client_db?.email_address || "",
-    phone: customer?.client_db?.phone_number || "",
+    email_address: customer?.client_db?.email_address || "",
+    phone_number: customer?.client_db?.phone_number || "",
     onnet_offnet: customer?.client_db?.onnet_offnet || "onnet",
-    pastel_name: customer?.client_db?.customer_name_pastel || "",
+    customer_name_pastel: customer?.client_db?.customer_name_pastel || "",
     area: customer?.client_db?.area || "",
+    first_name: customer?.client_db?.first_name || "",
+    provider: customer?.client_db?.provider || "",
+    special_comments: customer?.client_db?.special_comments || "",
   });
+
+  // Initialize edit form when customer data loads (reactive)
+  useEffect(() => {
+    if (customer?.client_db) {
+      setEditData({
+        email_address: customer.client_db.email_address || "",
+        phone_number: customer.client_db.phone_number || "",
+        onnet_offnet: customer.client_db.onnet_offnet || "onnet",
+        customer_name_pastel: customer.client_db.customer_name_pastel || "",
+        area: customer.client_db.area || "",
+        first_name: customer.client_db.first_name || "",
+        special_comments: customer.client_db.special_comments || "",
+        provider: customer.client_db.provider || "",
+      });
+    }
+  }, [customer]);
 
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphData, setGraphData] = useState([]);
@@ -235,7 +425,9 @@ const ViewDiaCutomer = () => {
         auth,
       });
 
-      const hostid = host[0]?.hostid;
+      console.log(host)
+      const hostid =
+        Array.isArray(host) && host.length > 0 ? host[0].hostid : undefined;
       if (!hostid) throw new Error("Host ID not found");
 
       // 3. GET GRAPH + ITEMS (SEARCH INTERFACE)
@@ -320,6 +512,434 @@ const ViewDiaCutomer = () => {
             >
               Upgrade/Downgrade
             </Button>
+            <Button
+              onClick={handleDiagnosis}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              Diagnosis
+            </Button>
+            {/* <Button
+              onClick={handleOpenUptimeModal}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+            >
+              Check Uptime
+            </Button> */}
+                  {/* === Diagnosis Modal === */}
+                    <Dialog open={isDiagnosisModalOpen} onOpenChange={setIsDiagnosisModalOpen}>
+                      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto dark:text-white">
+                      <DialogHeader>
+                        <DialogTitle>Diagnosis Result</DialogTitle>
+                      </DialogHeader>
+                      {diagnosisLoading ? (
+                        <div className="text-center py-8">Diagnosing... Please wait.</div>
+                      ) : diagnosisError ? (
+                        <div className="text-red-600 text-center py-4">{diagnosisError}</div>
+                      ) : diagnosisResult ? (
+                        <div className="space-y-4 py-2">
+                          {diagnosisResult.message && (
+                            <div className="font-semibold text-lg mb-2 text-primary dark:text-white">{diagnosisResult.message}</div>
+                          )}
+
+                          {/* Latency & Ping Results */}
+                          {(diagnosisResult.pingResult || (diagnosisResult.pingResults && Array.isArray(diagnosisResult.pingResults))) && (
+                            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-2">
+                              <h3 className="font-bold text-indigo-700 dark:text-indigo-300 mb-2">Latency & Ping Results</h3>
+                              {diagnosisResult.pingResult && (
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div><span className="font-semibold">IP:</span> {diagnosisResult.pingResult.ip}</div>
+                                  <div><span className="font-semibold">Packet Loss:</span> {diagnosisResult.pingResult.packetLoss}%</div>
+                                  <div><span className="font-semibold">Avg Latency:</span> {diagnosisResult.pingResult.avgLatency} ms</div>
+                                  <div><span className="font-semibold">Min Latency:</span> {diagnosisResult.pingResult.minLatency} ms</div>
+                                  <div><span className="font-semibold">Max Latency:</span> {diagnosisResult.pingResult.maxLatency} ms</div>
+                                  <div><span className="font-semibold">Stddev:</span> {diagnosisResult.pingResult.stddevLatency} ms</div>
+                                </div>
+                              )}
+                              {diagnosisResult.pingResults && Array.isArray(diagnosisResult.pingResults) && (
+                                <div className="mt-2">
+                                  {diagnosisResult.pingResults.map((pr: any, idx: number) => (
+                                    <div
+                                      key={idx}
+                                      className={`rounded-lg p-3 shadow border text-xs mb-2 ${pr.packetLoss > 0 ? "bg-red-50 dark:bg-red-900 border-red-200 dark:border-red-700" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"}`}
+                                    >
+                                      <div className="grid grid-cols-2 gap-2 text-sm">
+                                        <div><span className="font-semibold">IP:</span> {pr.ip}</div>
+                                        <div><span className="font-semibold">Packet Loss:</span> {pr.packetLoss}%</div>
+                                        <div><span className="font-semibold">Avg Latency:</span> {pr.avgLatency} ms</div>
+                                        <div><span className="font-semibold">Min Latency:</span> {pr.minLatency} ms</div>
+                                        <div><span className="font-semibold">Max Latency:</span> {pr.maxLatency} ms</div>
+                                        <div><span className="font-semibold">Stddev:</span> {pr.stddevLatency} ms</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Power Info */}
+                          {diagnosisResult.powerInfo && (
+                            <div className="bg-yellow-50 dark:bg-yellow-900 rounded-lg p-4 mb-2">
+                              <h3 className="font-bold text-yellow-700 dark:text-yellow-200 mb-2">Optical Power Diagnostics</h3>
+                              {Array.isArray(diagnosisResult.powerInfo) ? (
+                                <table className="w-full text-xs border dark:border-yellow-800">
+                                  <thead>
+                                    <tr className="bg-yellow-100 dark:bg-yellow-800">
+                                      <th className="p-1">Label</th>
+                                      <th className="p-1">mW</th>
+                                      <th className="p-1">dBm</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {diagnosisResult.powerInfo.map((p: any, idx: number) => (
+                                      <tr key={idx}>
+                                        <td className="p-1">{p.label}</td>
+                                        <td className="p-1">{p.mW}</td>
+                                        <td className="p-1">{p.dBm}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <div>{diagnosisResult.powerInfo}</div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Flap Info */}
+                          {diagnosisResult.flappedInfo && (
+                            <div className="bg-blue-50 dark:bg-blue-900 rounded-lg p-4 mb-2">
+                              <h3 className="font-bold text-blue-700 dark:text-blue-200 mb-2">Flap Info</h3>
+                              {typeof diagnosisResult.flappedInfo === "object" ? (
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div><span className="font-semibold">Last Flapped:</span> {diagnosisResult.flappedInfo.lastFlapped}</div>
+                                  <div><span className="font-semibold">Ago:</span> {diagnosisResult.flappedInfo.durationAgo}</div>
+                                </div>
+                              ) : (
+                                <div>{diagnosisResult.flappedInfo}</div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Neighbor Switch & Media Info */}
+                          {(diagnosisResult.neighborSwitch || diagnosisResult.customerPort || diagnosisResult.mediaType) && (
+                            <div className="bg-purple-50 dark:bg-purple-900 rounded-lg p-4 mb-2">
+                              <h3 className="font-bold text-purple-700 dark:text-purple-200 mb-2">Neighbor Switch Details</h3>
+                              <div className="grid grid-cols-2 gap-2 text-sm">
+                                {diagnosisResult.neighborSwitch && (
+                                  <>
+                                    <div>
+                                      <span className="font-semibold">Neighbor Name:</span>{" "}
+                                      {diagnosisResult.neighborSwitch.name || "Unknown"}
+                                    </div>
+                                    <div>
+                                      <span className="font-semibold">Neighbor IP:</span>{" "}
+                                      {diagnosisResult.neighborSwitch.ip}
+                                    </div>
+                                  </>
+                                )}
+                                {diagnosisResult.customerPort && (
+                                  <div>
+                                    <span className="font-semibold">Customer Port:</span>{" "}
+                                    {diagnosisResult.customerPort}
+                                  </div>
+                                )}
+                                {diagnosisResult.mediaType && (
+                                  <div>
+                                    <span className="font-semibold">Media Type:</span>{" "}
+                                    {diagnosisResult.mediaType}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Graph Data */}
+                          {diagnosisResult.graphData && diagnosisResult.graphData.sentData && diagnosisResult.graphData.recvData && (() => {
+                            // Dynamic unit logic (bps, Kbps, Mbps, Gbps)
+                            const sentVals = diagnosisResult.graphData.sentData.map((d: any) => Number(d.value));
+                            const recvVals = diagnosisResult.graphData.recvData.map((d: any) => Number(d.value));
+                            const allVals = [...sentVals, ...recvVals];
+                            const maxValue = Math.max(...allVals);
+                            let displayUnit = "bps";
+                            let divisor = 1;
+                            if (maxValue > 1_000_000_000) {
+                              displayUnit = "Gbps";
+                              divisor = 1_000_000_000;
+                            } else if (maxValue > 1_000_000) {
+                              displayUnit = "Mbps";
+                              divisor = 1_000_000;
+                            } else if (maxValue > 1_000) {
+                              displayUnit = "Kbps";
+                              divisor = 1_000;
+                            }
+
+                            // 95th percentile and summary stats helper
+                            const calcP95 = (data: any[]) => {
+                              if (!data || !data.length)
+                                return { p95: 0, max: 0, min: 0, avg: 0, samples: 0 };
+                              const values = data.map((d) => Number(d.value));
+                              if (!values.length)
+                                return { p95: 0, max: 0, min: 0, avg: 0, samples: 0 };
+                              const sorted = [...values].sort((a, b) => a - b);
+                              const p95Index = Math.ceil(0.95 * sorted.length) - 1;
+                              return {
+                                p95: sorted[p95Index] || 0,
+                                max: Math.max(...values),
+                                min: Math.min(...values),
+                                avg: values.reduce((a, b) => a + b, 0) / values.length,
+                                samples: values.length,
+                              };
+                            };
+
+                            const sentStats = calcP95(diagnosisResult.graphData.sentData);
+                            const recvStats = calcP95(diagnosisResult.graphData.recvData);
+
+                            // Compare p95 usage to provisioned bandwidth (Mbps)
+                            const upMbps = (customer as any)?.upmbps ?? (customer as any)?.diacustomer?.upmbps;
+                            const downMbps = (customer as any)?.downmbps ?? (customer as any)?.diacustomer?.downmbps;
+                            const upCapacityBps = typeof upMbps === "number" ? upMbps * 1_000_000 : null;
+                            const downCapacityBps = typeof downMbps === "number" ? downMbps * 1_000_000 : null;
+
+                            // Maxing based on maximum observed usage vs provisioned capacity
+                            const uploadPctOfCap = upCapacityBps ? (sentStats.max / upCapacityBps) * 100 : null;
+                            const downloadPctOfCap = downCapacityBps ? (recvStats.max / downCapacityBps) * 100 : null;
+
+                            const capacityStatus = (pct: number | null) => {
+                              if (pct == null || Number.isNaN(pct)) return "Unknown";
+                              if (pct >= 95) return "Maxed";
+                              if (pct >= 85) return "Near max";
+                              return "Not maxed";
+                            };
+                            // Detect theme (light/dark) for label color
+                            const isDark = document.documentElement.classList.contains('dark');
+                            const labelColor = isDark ? '#fff' : '#000';
+                            return (
+                              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 mb-2">
+                                <h3 className="font-bold text-green-700 dark:text-green-300 mb-2">Traffic Graph (Last 6 Hours)</h3>
+                                <div style={{ minWidth: "600px" }}>
+                                  <Line
+                                    data={{
+                                      labels: diagnosisResult.graphData.sentData.map((d: any) =>
+                                        new Date(d.clock * 1000).toLocaleTimeString()
+                                      ),
+                                      datasets: [
+                                        {
+                                          label: "Sent",
+                                          data: sentVals.map((v: number) => v / divisor),
+                                          borderColor: "rgba(68, 170, 170, 1)",
+                                          backgroundColor: "rgba(16, 43, 43, 0.2)",
+                                          tension: 0.3,
+                                          fill: false,
+                                        },
+                                        {
+                                          label: "Received",
+                                          data: recvVals.map((v: number) => v / divisor),
+                                          borderColor: "rgba(255, 99, 132, 1)",
+                                          backgroundColor: "rgba(255, 99, 132, 0.2)",
+                                          tension: 0.3,
+                                          fill: false,
+                                        },
+                                      ],
+                                    }}
+                                    options={{
+                                      responsive: true,
+                                      maintainAspectRatio: false,
+                                      plugins: {
+                                        legend: { display: true, labels: { color: labelColor, font: { weight: 'bold' } } },
+                                        title: { display: true, text: `Traffic (${displayUnit})`, color: labelColor },
+                                      },
+                                      interaction: { intersect: false, mode: "index" },
+                                      scales: {
+                                        x: {
+                                          title: { display: true, text: "Time", color: labelColor },
+                                          ticks: {
+                                            autoSkip: true,
+                                            maxRotation: 90,
+                                            minRotation: 90,
+                                            maxTicksLimit: 32,
+                                            color: labelColor,
+                                          },
+                                          grid: { color: "gray" },
+                                        },
+                                        y: {
+                                          title: { display: true, text: displayUnit, color: labelColor },
+                                          ticks: { color: labelColor },
+                                          beginAtZero: true,
+                                          grid: { color: "gray" },
+                                        },
+                                      },
+                                    }}
+                                    height={350}
+                                  />
+                                </div>
+                                <div className="mt-4 text-xs md:text-sm text-foreground dark:text-gray-200">
+                                  <h4 className="font-semibold mb-1">Usage Summary (95th Percentile)</h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <div>
+                                      <div className="font-semibold">Sent</div>
+                                      <div>P95: {(sentStats.p95 / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Max: {(sentStats.max / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Avg: {(sentStats.avg / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Samples: {sentStats.samples}</div>
+                                    </div>
+                                    <div>
+                                      <div className="font-semibold">Received</div>
+                                      <div>P95: {(recvStats.p95 / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Max: {(recvStats.max / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Avg: {(recvStats.avg / divisor).toFixed(2)} {displayUnit}</div>
+                                      <div>Samples: {recvStats.samples}</div>
+                                    </div>
+                                  </div>
+                                  {(upCapacityBps || downCapacityBps) && (
+                                    <div className="mt-3">
+                                      <h4 className="font-semibold mb-1">Capacity Check</h4>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {upCapacityBps && (
+                                          <div>
+                                            <span className="font-semibold">Upload:</span> {" "}
+                                            {capacityStatus(uploadPctOfCap)}
+                                            {uploadPctOfCap != null && !Number.isNaN(uploadPctOfCap) && (
+                                              <span>
+                                                {" "}({uploadPctOfCap.toFixed(1)}% of {upMbps} Mbps)
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                        {downCapacityBps && (
+                                          <div>
+                                            <span className="font-semibold">Download:</span> {" "}
+                                            {capacityStatus(downloadPctOfCap)}
+                                            {downloadPctOfCap != null && !Number.isNaN(downloadPctOfCap) && (
+                                              <span>
+                                                {" "}({downloadPctOfCap.toFixed(1)}% of {downMbps} Mbps)
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Healthy customer note */}
+                          {/* {diagnosisResult.message === "Customer is healthy" && (
+                            <div className="mt-2 text-sm text-green-700 dark:text-green-500 font-bold uppercase">
+                              ***Note: Please check the CPE for LAN analysis.
+                            </div>
+                          )} */}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4">No diagnosis data.</div>
+                      )}
+                      <DialogFooter>
+                        <Button onClick={() => setIsDiagnosisModalOpen(false)} type="button">Close</Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* === Uptime Modal === */}
+                  {/* <Dialog open={isUptimeModalOpen} onOpenChange={setIsUptimeModalOpen}>
+                    <DialogContent className="max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Uptime Analysis</DialogTitle>
+                        <DialogDescription>
+                          Select a start date (up to the last 90 days). Uptime is
+                          calculated based on Zabbix graph samples where traffic
+                          &gt; 0 bps is considered UP and 0 bps is DOWN.
+                        </DialogDescription>
+                      </DialogHeader>
+
+                      {(() => {
+                        const now = new Date();
+                        const today = now.toISOString().split("T")[0];
+                        const ninetyDaysAgo = new Date(
+                          now.getTime() - 90 * 24 * 60 * 60 * 1000
+                        )
+                          .toISOString()
+                          .split("T")[0];
+
+                        return (
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="uptime-start-date">Start Date</Label>
+                              <Input
+                                id="uptime-start-date"
+                                type="date"
+                                value={uptimeStartDate}
+                                min={ninetyDaysAgo}
+                                max={today}
+                                onChange={(e) => setUptimeStartDate(e.target.value)}
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Range: from selected date until now (maximum 90 days).
+                              </p>
+                            </div>
+
+                            {uptimeError && (
+                              <p className="text-sm text-red-600">{uptimeError}</p>
+                            )}
+
+                            {uptimeLoading ? (
+                              <p className="text-sm">Calculating uptime, please wait...</p>
+                            ) : (
+                              uptimeResult && (
+                                <div className="space-y-2 rounded-md border p-3 text-sm">
+                                  <p>
+                                    <span className="font-semibold">Customer:</span>{" "}
+                                    {customerData.customerName}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Interface:</span>{" "}
+                                    {uptimeResult.interfaceName}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Percentage Up:</span>{" "}
+                                    {uptimeResult.uptimePercentage}%
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Percentage Down:</span>{" "}
+                                    {uptimeResult.downtimePercentage}%
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Start Date:</span>{" "}
+                                    {formatDisplayDate(uptimeResult.startDate)}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">End Date:</span>{" "}
+                                    {formatDisplayDate(uptimeResult.endDate)}
+                                  </p>
+                                </div>
+                              )
+                            )}
+
+                            <DialogFooter>
+                              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                <Button
+                                  type="button"
+                                  onClick={handleCheckUptime}
+                                  disabled={uptimeLoading}
+                                >
+                                  {uptimeLoading ? "Checking..." : "Check Uptime"}
+                                </Button>
+                                {uptimeResult && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleDownloadUptimePdf}
+                                  >
+                                    Download PDF
+                                  </Button>
+                                )}
+                              </div>
+                            </DialogFooter>
+                          </div>
+                        );
+                      })()}
+                    </DialogContent>
+                  </Dialog> */}
             <Button
               onClick={() => setIsEditModalOpen(true)}
               className="bg-secondary hover:bg-secondary/90 text-secondary-foreground font-semibold"
@@ -545,18 +1165,28 @@ const ViewDiaCutomer = () => {
             <DialogTitle>Edit Customer Details</DialogTitle>
             <DialogDescription>
               Update customer contact and billing information.
+              {!customer?.client_db && " This will create a new client record linked to this CID."}
             </DialogDescription>
           </DialogHeader>
-
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               try {
-                await axios.put(`${PRODUCTION_URL}/customer/update`, {
-                  id: customer?.id,
-                  ...editData,
-                });
-                alert("Customer updated successfully");
+                if (!customerData.cid) {
+                  alert('CID is required to update client details');
+                  return;
+                }
+
+                const res = await axios.put(`${PRODUCTION_URL}/client-db/${customerData.cid}`, editData);
+
+                // Refresh customer data if possible
+                if (customerData?.id) {
+                  const res = await axios.get(`${PRODUCTION_URL}/customers/${customer.id}`);
+                  console.log(res);
+                  setCustomer(res.data);
+                }
+
+                alert("Customer details updated successfully");
                 setIsEditModalOpen(false);
               } catch (error: any) {
                 alert(error.response?.data?.message || "Update failed");
@@ -568,26 +1198,26 @@ const ViewDiaCutomer = () => {
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Email</Label>
               <Input
-                value={editData.email}
+                value={editData.email_address}
                 onChange={(e) =>
-                  setEditData((p) => ({ ...p, email: e.target.value }))
+                  setEditData((p) => ({ ...p, email_address: e.target.value }))
                 }
                 className="col-span-3"
+                placeholder="customer@example.com"
               />
             </div>
-
             {/* Phone */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Phone</Label>
               <Input
-                value={editData.phone}
+                value={editData.phone_number}
                 onChange={(e) =>
-                  setEditData((p) => ({ ...p, phone: e.target.value }))
+                  setEditData((p) => ({ ...p, phone_number: e.target.value }))
                 }
                 className="col-span-3"
+                placeholder="+255 XXX XXX XXX"
               />
             </div>
-
             {/* Onnet / Offnet */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Network Type</Label>
@@ -606,19 +1236,18 @@ const ViewDiaCutomer = () => {
                 </SelectContent>
               </Select>
             </div>
-
             {/* Pastel Name */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Pastel Name</Label>
               <Input
-                value={editData.pastel_name}
+                value={editData.customer_name_pastel}
                 onChange={(e) =>
-                  setEditData((p) => ({ ...p, pastel_name: e.target.value }))
+                  setEditData((p) => ({ ...p, customer_name_pastel: e.target.value }))
                 }
                 className="col-span-3"
+                placeholder="Customer name in Pastel"
               />
             </div>
-
             {/* Area */}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">Area</Label>
@@ -628,9 +1257,45 @@ const ViewDiaCutomer = () => {
                   setEditData((p) => ({ ...p, area: e.target.value }))
                 }
                 className="col-span-3"
+                placeholder="e.g., Dar es Salaam"
               />
             </div>
-
+            {/* Contact Name */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Contact Name</Label>
+              <Input
+                value={editData.first_name}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, first_name: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="Contact person name"
+              />
+            </div>
+            {/* Provider */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Provider</Label>
+              <Input
+                value={editData.provider}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, provider: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="e.g., Liquid Telecom"
+              />
+            </div>
+            {/* Comments */}
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Comments</Label>
+              <Input
+                value={editData.special_comments}
+                onChange={(e) =>
+                  setEditData((p) => ({ ...p, special_comments: e.target.value }))
+                }
+                className="col-span-3"
+                placeholder="Special notes or comments"
+              />
+            </div>
             <DialogFooter>
               <Button type="submit">Save</Button>
             </DialogFooter>
@@ -671,7 +1336,6 @@ const ViewDiaCutomer = () => {
 export default ViewDiaCutomer;
 
 const zabbixApi = async (payload) => {
-  console.log(payload);
   const res = await axios.post(
     "https://monitoring.liquidtelecom.net/api_jsonrpc.php",
     {

@@ -32,6 +32,9 @@ const uptimeHistoryRoutes = require("./routes/uptimeHistory");
 const churnAnalysisRoutes = require("./routes/churnAnalysis");
 const notificationRoutes = require("./routes/notification");
 const exportRoutes = require("./routes/export");
+const diagnosisRoutes = require("./routes/diagnosis");
+const diaOverusageRoutes = require("./routes/diaOverusage");
+const pitchForUpgradeRoutes = require("./routes/pitchForUpgrade");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -50,6 +53,9 @@ app.use("/churn-analysis", churnAnalysisRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/percentile-reports", require("./routes/percentileReport.js"));
 app.use("/provisioning", require("./routes/provisioning.js"));
+app.use("/diagnosis", diagnosisRoutes);
+app.use("/dia-overusage", diaOverusageRoutes);
+app.use('/pitch-for-upgrade', pitchForUpgradeRoutes);
 // app.use("/ml", require("./routes/ml.js"));
 app.use("/export", exportRoutes);
 
@@ -58,6 +64,8 @@ const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
 const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io);
 const { updateShared } = require("./cron/updateShared")(io);
 const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
+const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
+const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
 
 // Socket for SSH
 io.on("connection", (socket) => {
@@ -159,6 +167,8 @@ require("./cron/updateIPT")(io);
 require("./cron/updateShared")(io);
 require("./cron/cleanupStaleCustomers")(io);
 require("./cron/uptimeTracker");
+scheduleDiaOverusageCron();
+schedulePitchForUpgradeCron();
 
 // Initialize status tracker cache
 const { initializeCache } = require("./utils/statusTracker");

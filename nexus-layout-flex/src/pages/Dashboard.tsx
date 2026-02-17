@@ -191,6 +191,9 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold tracking-tight text-foreground">
           Dashboard
         </h1>
+        <h3 className="font-bold tracking-tight  text-foreground">
+        Network Overview
+        </h3>
         <p className="text-muted-foreground">
           Welcome back! Here's what's happening with your network services today.
         </p>
@@ -360,7 +363,7 @@ export default function Dashboard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Activity className="h-5 w-5 text-primary" />
-            Network Overview
+            Customer Summary
           </CardTitle>
         </CardHeader>
         <CardContent>

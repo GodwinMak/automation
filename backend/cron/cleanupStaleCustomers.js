@@ -8,7 +8,7 @@ require("dotenv").config({ path: "../.env" });
 module.exports = (io) => {
   const sshConfig = {
     username: "godwin.makyao",
-    password: "Namwel@842001!#@",
+    password: "Namwel200148#@!",
   };
 
   // === DATABASE MODELS ===

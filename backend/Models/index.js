@@ -44,6 +44,8 @@ db.uptimehistories = require("./uptimeHistory.js")(sequelize, DataTypes);
 db.statusChangeHistories = require("./statusChangeHistory.js")(sequelize, DataTypes);
 db.percentileReports = require("./percentileReport.js")(sequelize, DataTypes);
 db.notifications = require("./notification.js")(sequelize, DataTypes);
+db.diaOverusageReports = require("./diaOverusageReport.js")(sequelize, DataTypes);
+db.pitchForUpgradeReports = require("./pitchForUpgradeReport.js")(sequelize, DataTypes);
 
 
 // Relations

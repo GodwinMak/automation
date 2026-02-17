@@ -137,14 +137,18 @@ const ViewSharedCustomer = () => {
 
     setEditLoading(true);
     try {
-      await axios.put(`${PRODUCTION_URL}/client-db/${customerData.cid}`, editData);
-      
-      // Refresh customer data
+      // Prefer customer-specific endpoint
       if (customer?.id) {
+        await axios.put(`${PRODUCTION_URL}/sharedcustomers/${customer.id}/client-db`, editData);
+
+        // Refresh customer data
         const res = await axios.get(`${PRODUCTION_URL}/sharedcustomers/${customer.id}`);
         setCustomer(res.data);
+      } else {
+        // Fallback to CID-based endpoint
+        await axios.put(`${PRODUCTION_URL}/client-db/${customerData.cid}`, editData);
       }
-      
+
       alert("Customer details updated successfully");
       setIsEditModalOpen(false);
     } catch (error: any) {
@@ -159,8 +163,8 @@ const ViewSharedCustomer = () => {
     const hostMapping: Record<string, string> = {
       "LTZ-PE1-RAH": "lo-0.ltz-pe1-rah.liquidtelecom.net",
       "LTZ-P1-DAR": "lo-0.ltz-p1-dar.liquidtelecom.net",
-      "LTZ-ACC2-RAH": "lo-0.ltz-acc2-rah.liquidtelecom.net",
-      "LTZ-ACC3-RAH": "lo-0.ltz-acc3-rah.liquidtelecom.net",
+      // "LTZ-ACC2-RAH": "lo-0.ltz-acc2-rah.liquidtelecom.net",
+      // "LTZ-ACC3-RAH": "lo-0.ltz-acc3-rah.liquidtelecom.net",
       // Add more mappings here as needed
     };
     return hostMapping[switchName] || switchName;
@@ -188,7 +192,8 @@ const ViewSharedCustomer = () => {
         auth,
       });
 
-      const hostid = host[0]?.hostid;
+      const hostid =
+        Array.isArray(host) && host.length > 0 ? host[0].hostid : undefined;
       if (!hostid) throw new Error("Host ID not found");
 
       // GET GRAPH + ITEMS (SEARCH INTERFACE)

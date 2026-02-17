@@ -130,6 +130,9 @@ export function Navbar() {
 
       console.log("Emitting 'manualDiaUpdate' to server.");
       socketRef.current.emit("manualDiaUpdate");
+      socketRef.current.emit("manualSharedUpdate");
+      socketRef.current.emit("manualCleanupStaleCustomers");
+
     }
   };
 

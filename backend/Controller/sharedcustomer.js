@@ -47,6 +47,71 @@ exports.getSharedCustomerById = async (req, res) => {
   }
 };
 
+// Update or create client_db for a Shared customer by shared customer info ID
+exports.updateClientDbForShared = async (req, res) => {
+  const { id } = req.params;
+  const {
+    email_address,
+    phone_number,
+    onnet_offnet,
+    customer_name_pastel,
+    area,
+    first_name,
+    special_comments,
+    medium_details,
+    revenue_head,
+    provider,
+    new_customer_type,
+  } = req.body;
+
+  try {
+    const info = await db.sharedcustomerinfos.findByPk(id);
+    if (!info) return res.status(404).json({ message: 'Shared customer not found' });
+
+    const cid = info.cid;
+    if (!cid) return res.status(400).json({ message: 'CID not found for this Shared customer' });
+
+    let record = await ClientDb.findOne({ where: { network_cid: cid } });
+    if (record) {
+      await record.update({
+        email_address: email_address !== undefined ? email_address : record.email_address,
+        phone_number: phone_number !== undefined ? phone_number : record.phone_number,
+        onnet_offnet: onnet_offnet !== undefined ? onnet_offnet : record.onnet_offnet,
+        customer_name_pastel: customer_name_pastel !== undefined ? customer_name_pastel : record.customer_name_pastel,
+        area: area !== undefined ? area : record.area,
+        first_name: first_name !== undefined ? first_name : record.first_name,
+        special_comments: special_comments !== undefined ? special_comments : record.special_comments,
+        medium_details: medium_details !== undefined ? medium_details : record.medium_details,
+        revenue_head: revenue_head !== undefined ? revenue_head : record.revenue_head,
+        provider: provider !== undefined ? provider : record.provider,
+        new_customer_type: new_customer_type !== undefined ? new_customer_type : record.new_customer_type,
+      });
+
+      return res.status(200).json({ message: 'Client DB updated successfully', data: record });
+    }
+
+    record = await ClientDb.create({
+      network_cid: cid,
+      email_address,
+      phone_number,
+      onnet_offnet,
+      customer_name_pastel,
+      area,
+      first_name,
+      special_comments,
+      medium_details,
+      revenue_head,
+      provider,
+      new_customer_type,
+    });
+
+    return res.status(201).json({ message: 'Client DB created successfully', data: record });
+  } catch (error) {
+    console.error('Error updating client_db for Shared:', error);
+    return res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 exports.getAllSharedCustomers = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.pageSize) || 10;
@@ -93,6 +158,7 @@ exports.getAllSharedCustomers = async (req, res) => {
             "phone_number",
             "network_cid",
             "provider",
+            "first_name",
           ],
           required: false,
         },

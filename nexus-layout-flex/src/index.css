@@ -216,6 +216,11 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  /* Better visibility for native date inputs in light & dark mode */
+  input[type="date"] {
+    @apply bg-background text-foreground border border-border rounded-md px-3 py-2;
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 8px;

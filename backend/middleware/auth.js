@@ -15,6 +15,7 @@ const ROLE_PERMISSIONS = {
     canViewUptimeTrends: true,
     canViewChurnAnalysis: true,
     canView95thReport: true,
+    canDiagnoseCustomer: true,
   },
   operator: {
     // Operator has same as Admin but no user management
@@ -25,6 +26,7 @@ const ROLE_PERMISSIONS = {
     canViewUptimeTrends: true,
     canViewChurnAnalysis: true,
     canView95thReport: false,
+    canDiagnoseCustomer: true,
   },
   customer_relation: {
     // Customer Relation has limited access
@@ -33,8 +35,11 @@ const ROLE_PERMISSIONS = {
     canUpgradeCustomers: false,
     canViewCapacity: false,
     canViewUptimeTrends: false,
-    canViewChurnAnalysis: false,
+    // Allow customer_relation to view churn analysis, but data will be
+    // restricted server-side to their own watchlist.
+    canViewChurnAnalysis: true,
     canView95thReport: false,
+    canDiagnoseCustomer: false,
   },
 };
 
@@ -64,6 +69,15 @@ const verifyToken = async (req, res, next) => {
 
     if (!user.isActive) {
       return res.status(401).json({ message: "User account is deactivated" });
+    }
+
+    // If the user changed their password after the token was issued, reject the token
+    if (user.passwordChangedAt) {
+      const tokenIat = decoded.iat; // issued at (seconds)
+      const pwdChangedAtSec = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
+      if (tokenIat < pwdChangedAtSec) {
+        return res.status(401).json({ message: "Password changed. Please login again." });
+      }
     }
 
     // Attach user and permissions to request

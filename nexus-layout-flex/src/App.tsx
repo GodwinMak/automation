@@ -32,6 +32,8 @@ import CombinedPercentileReport from "./pages/CombinedPercentileReport";
 import NonTagDIA from "./pages/NonTagDIA";
 import WithTagDIA from "./pages/WithTagDIA";
 import UserManagement from "./pages/UserManagement";
+import DiaOverusageReport from "./pages/DiaOverusageReport";
+import PitchForUpgrade from "./pages/PitchForUpgrade";
 
 const queryClient = new QueryClient();
 
@@ -175,6 +177,22 @@ const App = () => {
                     element={
                       <ProtectedRoute requiredPermission="canViewCapacity">
                         <Capacity />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/dia-overusage-report"
+                    element={
+                      <ProtectedRoute requiredPermission="canViewCapacity">
+                        <DiaOverusageReport />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pitch-for-upgrade"
+                    element={
+                      <ProtectedRoute requiredPermission="canViewCapacity">
+                        <PitchForUpgrade />
                       </ProtectedRoute>
                     }
                   />

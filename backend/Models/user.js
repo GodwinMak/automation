@@ -33,6 +33,11 @@ module.exports = (sequelize, DataTypes) => {
             allowNull: false,
             defaultValue: true,
         },
+        // Timestamp of when the user last changed their password
+        passwordChangedAt: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
         lastLogin: {
             type: DataTypes.DATE,
             allowNull: true,

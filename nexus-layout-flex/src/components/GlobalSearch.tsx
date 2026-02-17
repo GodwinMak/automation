@@ -94,6 +94,7 @@ export const GlobalSearch = () => {
     setLoading(true);
     try {
       const res = await axios.get(`${PRODUCTION_URL}/search?q=${encodeURIComponent(query)}&limit=10`);
+      console.log(res)
       setResults(res.data.results || []);
       setIsOpen(true);
       setSelectedIndex(-1);

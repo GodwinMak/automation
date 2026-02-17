@@ -9,7 +9,7 @@ require("dotenv").config({ path: "../.env" });
 module.exports = (io) => {
   const sshConfig = {
     username: "godwin.makyao",
-    password: "Namwel@842001!#@",
+    password: "Namwel200148#@!",
   };
 
   const Device = db.devices;
@@ -947,7 +947,7 @@ module.exports = (io) => {
       console.error("[Main Runner] Fatal error:", err.message);
     }
   };
-  cron.schedule("0 * * * *", runAll);
+  cron.schedule("*/5 * * * *", runAll);
   // Run immediately for testing
   // runAll();
 
