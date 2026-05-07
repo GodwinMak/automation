@@ -3,14 +3,17 @@ const cron = require("node-cron");
 const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op, literal } = require("sequelize");
-const { trackStatusChanges, getDiaCustomerInfoMap } = require("../utils/statusTracker");
+const {
+  trackStatusChanges,
+  getDiaCustomerInfoMap,
+} = require("../utils/statusTracker");
 
 require("dotenv").config({ path: "../.env" });
 
 module.exports = (io) => {
   const sshConfig = {
     username: "godwin.makyao",
-    password: "Namwel200148#@!",
+    password: "Namweltyner123!@#",
   };
 
   // === DATABASE MODELS ===
@@ -55,7 +58,7 @@ module.exports = (io) => {
       // --- REAL-TIME NOTIFICATION ---
       console.log("========================================");
       console.log(
-        `🚀 Emitting 'linkDownAlert' to frontend for: ${notificationPayload.interface}`
+        `🚀 Emitting 'linkDownAlert' to frontend for: ${notificationPayload.interface}`,
       );
       console.log("========================================");
 
@@ -64,7 +67,7 @@ module.exports = (io) => {
     } catch (error) {
       console.error(
         `[Notification] Failed to process notification for ${interfaceData.interface}:`,
-        error.message
+        error.message,
       );
     }
   };
@@ -150,8 +153,6 @@ module.exports = (io) => {
       attributes[match[1].toLowerCase()] = match[2].trim();
     }
 
-    
-
     // Step 2: Use the collected attributes to populate the info object
 
     const cat = attributes["cat"] || attributes["CAT"];
@@ -216,7 +217,7 @@ module.exports = (io) => {
       });
 
       console.log(
-        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`
+        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`,
       );
     }
   };
@@ -243,7 +244,7 @@ module.exports = (io) => {
 
     for (const line of lines) {
       const match = line.match(
-        /^set interfaces (\S+) unit (\d+) layer2-policer (input-policer|output-policer) (\S+-POLICER)$/i
+        /^set interfaces (\S+) unit (\d+) layer2-policer (input-policer|output-policer) (\S+-POLICER)$/i,
       );
 
       if (!match) {
@@ -283,12 +284,12 @@ module.exports = (io) => {
       }
 
       console.log(
-        `[parsePolicerOutput] Parsed ${key}: direction=${direction}, mbps=${mbps}`
+        `[parsePolicerOutput] Parsed ${key}: direction=${direction}, mbps=${mbps}`,
       );
     }
 
     console.log(
-      `[parsePolicerOutput] Finished parsing. Found ${map.size} entries.`
+      `[parsePolicerOutput] Finished parsing. Found ${map.size} entries.`,
     );
 
     return map;
@@ -303,7 +304,7 @@ module.exports = (io) => {
       const switchResults = await Promise.allSettled(
         allDevices.map(async (sw) => {
           console.log(
-            `[BandwidthUpdater] Running on ${sw.name} (${sw.host})...`
+            `[BandwidthUpdater] Running on ${sw.name} (${sw.host})...`,
           );
 
           const cmd = `show configuration interfaces | display set | match "policer"`;
@@ -311,11 +312,11 @@ module.exports = (io) => {
           const output = await runCommand(sw.host, cmd);
 
           console.log(
-            `[BandwidthUpdater] Raw output from ${sw.name}:\n---\n${output}\n---`
+            `[BandwidthUpdater] Raw output from ${sw.name}:\n---\n${output}\n---`,
           );
 
           return { sw, map: parsePolicerOutput(output) };
-        })
+        }),
       );
 
       // Step 2: Merge all switch maps
@@ -325,7 +326,7 @@ module.exports = (io) => {
       for (const result of switchResults) {
         if (result.status === "fulfilled") {
           console.log(
-            `[BandwidthUpdater] Parsed ${result.value.map.size} entries from ${result.value.sw.name}`
+            `[BandwidthUpdater] Parsed ${result.value.map.size} entries from ${result.value.sw.name}`,
           );
 
           for (const [key, val] of result.value.map.entries()) {
@@ -335,13 +336,13 @@ module.exports = (io) => {
           console.error(
             `[BandwidthUpdater] ❌ Error from switch:`,
 
-            result.reason.message
+            result.reason.message,
           );
         }
       }
 
       console.log(
-        `[BandwidthUpdater] Merged policer map size: ${policerMap.size}`
+        `[BandwidthUpdater] Merged policer map size: ${policerMap.size}`,
       );
 
       // Step 3: Fetch all customer infos
@@ -393,7 +394,7 @@ module.exports = (io) => {
           console.log(
             `[BandwidthUpdater] Queued update for ${info.interface}:`,
 
-            updateObj
+            updateObj,
           );
         }
       }
@@ -406,7 +407,7 @@ module.exports = (io) => {
         });
 
         console.log(
-          `[BandwidthUpdater] ✅ Updated ${updates.length} customer records`
+          `[BandwidthUpdater] ✅ Updated ${updates.length} customer records`,
         );
       } else {
         console.log("[BandwidthUpdater] ℹ️ No updates needed");
@@ -452,7 +453,7 @@ module.exports = (io) => {
     }
 
     console.log(
-      `[parseInterfaceAddresses] Found ${map.size} interface addresses.`
+      `[parseInterfaceAddresses] Found ${map.size} interface addresses.`,
     );
     return map;
   };
@@ -511,7 +512,7 @@ module.exports = (io) => {
     const switchResults = await Promise.allSettled(
       allDevices.map(async (sw) => {
         console.log(
-          `[DIA Updater] Fetching addresses from ${sw.name} (${sw.host})...`
+          `[DIA Updater] Fetching addresses from ${sw.name} (${sw.host})...`,
         );
 
         // 🎯 The new command you requested
@@ -519,7 +520,7 @@ module.exports = (io) => {
         const output = await runCommand(sw.host, cmd);
 
         return { sw, map: parseInterfaceAddresses(output) };
-      })
+      }),
     );
     // 2. Merge all switch maps into one central addressMap
     for (const result of switchResults) {
@@ -530,7 +531,7 @@ module.exports = (io) => {
       } else {
         console.error(
           `[DIA Updater] ❌ Error fetching addresses from switch:`,
-          result.reason.message
+          result.reason.message,
         );
       }
     }
@@ -562,11 +563,11 @@ module.exports = (io) => {
         })),
         {
           updateOnDuplicate: ["destination"],
-        }
+        },
       );
 
       console.log(
-        `[DIA Updater] ✅ Updated ${updates.length} records with interface IP addresses.`
+        `[DIA Updater] ✅ Updated ${updates.length} records with interface IP addresses.`,
       );
     } else {
       console.log(`[DIA Updater] ℹ️ No new interface IP addresses to update.`);
@@ -588,7 +589,7 @@ module.exports = (io) => {
     const switchResults = await Promise.allSettled(
       allDevices.map(async (sw) => {
         console.log(
-          `[DIA Updater] Fetching cid from ${sw.name} (${sw.host})...`
+          `[DIA Updater] Fetching cid from ${sw.name} (${sw.host})...`,
         );
 
         //🎯 The new command you requested
@@ -596,7 +597,7 @@ module.exports = (io) => {
         const output = await runCommand(sw.host, cmd);
 
         return { sw, map: parseInterfaceCid(output) };
-      })
+      }),
     );
 
     // 2. Merge all switch mpas into one central addressMap
@@ -608,7 +609,7 @@ module.exports = (io) => {
       } else {
         console.error(
           `[DIA Updater] ❌ Error fetching addresses from switch:`,
-          result.reason.message
+          result.reason.message,
         );
       }
     }
@@ -646,10 +647,10 @@ module.exports = (io) => {
         })),
         {
           updateOnDuplicate: ["cid"],
-        }
+        },
       );
       console.log(
-        `[DIA Updater] ✅ Updated ${updates.length} records with interface circuit id.`
+        `[DIA Updater] ✅ Updated ${updates.length} records with interface circuit id.`,
       );
     } else {
       console.log(`DIA Updater] ℹ️ No new interface circuit id to update.`);
@@ -666,69 +667,115 @@ module.exports = (io) => {
           console.log(`[DIA Updater] Fetching from ${sw.name}...`);
           const descOutput = await runCommand(
             sw.host,
-            "show interfaces descriptions"
+            "show interfaces descriptions",
           );
           const parsed = parseInterfaces(descOutput, sw.name);
           console.log(
-            `[DIA Updater] ${sw.name} returned ${parsed.length} interfaces`
+            `[DIA Updater] ${sw.name} returned ${parsed.length} interfaces`,
           );
           return parsed;
-        })
+        }),
       );
 
       const peResults = await Promise.all(
         pe.map(async (p) => {
           console.log(`[DIA Updater] Fetching from PE ${p.name}...`);
-          const cmd =
-            "show interfaces descriptions | match DIA | except down | except mgmt";
+          const cmd = "show interfaces descriptions | match DIA |except mgmt";
           const descOutput = await runCommand(p.host, cmd);
           const parsed = parseInterfaces(descOutput, p.name);
           console.log(
-            `[DIA Updater] PE ${p.name} returned ${parsed.length} interfaces`
+            `[DIA Updater] PE ${p.name} returned ${parsed.length} interfaces`,
           );
           return parsed;
-        })
+        }),
       );
       let allInterfaces = [...bngResults.flat(), ...peResults.flat()];
       // === Deduplicate by interface (prefer operational up) ===
-      const seen = new Map();
-      for (const intf of allInterfaces) {
-        const key = `${intf.interface}`;
-        const existing = seen.get(key);
-        const isFromPE = pe.some((p) => p.name === intf.switchName);
+      // const seen = new Map();
+      // for (const intf of allInterfaces) {
+      //   const key = `${intf.interface}`;
+      //   const existing = seen.get(key);
+      //   const isFromPE = pe.some((p) => p.name === intf.switchName);
 
-        if (!existing) {
-          // If interface is not seen, add it
-          seen.set(key, intf);
-        } else {
-          // If already seen, check for preference
-          const existingIsFromPE = pe.some(
-            (p) => p.name === existing.switchName
-          );
+      //   if (!existing) {
+      //     // If interface is not seen, add it
+      //     seen.set(key, intf);
+      //   } else {
+      //     // If already seen, check for preference
+      //     const existingIsFromPE = pe.some(
+      //       (p) => p.name === existing.switchName
+      //     );
 
-          if (isFromPE && !existingIsFromPE) {
-            // New interface is from PE, existing is from BNG. Prefer PE.
-            seen.set(key, intf);
-          } else if (
-            intf.operationalStatus === "up" &&
-            existing.operationalStatus === "down"
-          ) {
-            // If both are from the same type (BNG/PE) or we're not dealing with a PE, prefer 'up' status.
-            seen.set(key, intf);
-          }
+      //     if (isFromPE && !existingIsFromPE) {
+      //       // New interface is from PE, existing is from BNG. Prefer PE.
+      //       seen.set(key, intf);
+      //     } else if (
+      //       intf.operationalStatus === "up" &&
+      //       existing.operationalStatus === "down"
+      //     ) {
+      //       // If both are from the same type (BNG/PE) or we're not dealing with a PE, prefer 'up' status.
+      //       seen.set(key, intf);
+      //     }
+      //   }
+      // }
+      // allInterfaces = Array.from(seen.values());
+
+      // 1. Group all interfaces by their ID
+      const groups = new Map();
+      allInterfaces.forEach((intf) => {
+        const list = groups.get(intf.interface) || [];
+        list.push(intf);
+        groups.set(intf.interface, list);
+      });
+
+      const finalInterfaces = [];
+
+      for (const [name, matches] of groups) {
+        // --- RULE 1: PREFER OPERATIONAL UP ---
+        const upMatches = matches.filter(
+          (m) => m.operationalStatus.toLowerCase() === "up",
+        );
+        const candidates = upMatches.length > 0 ? upMatches : matches;
+
+        if (candidates.length === 1) {
+          finalInterfaces.push(candidates[0]);
+          continue;
+        }
+
+        // Identify source types for the remaining candidates
+        const bngMatches = candidates.filter((c) =>
+          switches.some((s) => s.name === c.switchName),
+        );
+        const peMatches = candidates.filter((c) =>
+          pe.some((p) => p.name === c.switchName),
+        );
+
+        // --- RULE 2: PREFER WHERE IT HAPPENS TWICE ---
+        // (e.g., if BNG has 2 entries and PE has 1, take BNG)
+        if (bngMatches.length > peMatches.length) {
+          finalInterfaces.push(bngMatches[0]);
+        } else if (peMatches.length > bngMatches.length) {
+          finalInterfaces.push(peMatches[0]);
+        }
+        // --- RULE 3: IF TIE (1 BNG vs 1 PE), TAKE PE ---
+        else {
+          // If there's a PE entry available in the tie, take it; otherwise fallback to BNG
+          const winner = peMatches.length > 0 ? peMatches[0] : bngMatches[0];
+          finalInterfaces.push(winner);
         }
       }
-      allInterfaces = Array.from(seen.values());
+
+      allInterfaces = finalInterfaces;
 
       // === NOTIFICATION LOGIC ===
       console.log(
-        "[DIA Updater] Checking for status changes for notifications..."
+        "[DIA Updater] Checking for status changes for notifications...",
       );
       const previousStates = await diacustomer.findAll({
         attributes: ["interface", "operationalStatus"],
       });
       const previousStateMap = new Map(
-        previousStates.map((item) => [item.interface, item.operationalStatus])
+        previousStates.map((item) => [item.interface, item.operationalStatus]),
       );
 
       for (const currentInterface of allInterfaces) {
@@ -736,7 +783,7 @@ module.exports = (io) => {
         const currentStatus = currentInterface.operationalStatus;
         if (previousStatus === "up" && currentStatus === "down") {
           console.log(
-            `[DIA Updater] STATUS CHANGE DETECTED: ${currentInterface.interface} went from UP to DOWN.`
+            `[DIA Updater] STATUS CHANGE DETECTED: ${currentInterface.interface} went from UP to DOWN.`,
           );
           await sendDownNotification(currentInterface); // This now emits the socket event
         }
@@ -813,14 +860,14 @@ module.exports = (io) => {
           const shortIntf = `${base}.0`;
 
           console.log(
-            `[AGG Updater] Trying BNG interfaces for ${nbr}, interface: ${shortIntf}`
+            `[AGG Updater] Trying BNG interfaces for ${nbr}, interface: ${shortIntf}`,
           );
           for (const bng of switches) {
             try {
               // Run on BNG
               const neighOut = await runCommand(
                 bng.host,
-                `show l2circuit connections interface ${shortIntf} | match Neighbor`
+                `show l2circuit connections interface ${shortIntf} | match Neighbor`,
               );
               const neighRegex = /Neighbor:\s+(\d{1,3}(?:\.\d{1,3}){3})/i;
               const neighMatch = neighOut.match(neighRegex);
@@ -829,7 +876,7 @@ module.exports = (io) => {
 
               const ip = neighMatch[1];
               console.log(
-                `[AGG Updater] Found neighbor ${ip} on ${bng.name} for ${nbr}`
+                `[AGG Updater] Found neighbor ${ip} on ${bng.name} for ${nbr}`,
               );
               if (nbr === "LTZ-ACC1-DAR") {
                 // i want to not enter in the agg loop if the nbr is ltz-acc1-dar
@@ -842,12 +889,12 @@ module.exports = (io) => {
 
                 const descOut = await runCommand(
                   sw.host,
-                  `show configuration | display set | match ${ip}`
+                  `show configuration | display set | match ${ip}`,
                 );
 
                 const descRegex = new RegExp(
                   `neighbor\\s+${ip}\\s+description\\s+(?:"([^"]+)"|(\\S+))`,
-                  "i"
+                  "i",
                 );
 
                 const descMatch = descOut.match(descRegex);
@@ -881,24 +928,24 @@ module.exports = (io) => {
                     if (!device) {
                       await Device.upsert(
                         { ip, name: finalDescription },
-                        { fields: ["ip", "name"] }
+                        { fields: ["ip", "name"] },
                       );
                       await customerinfo.update(
                         { nbr: finalDescription },
-                        { where: { id } }
+                        { where: { id } },
                       );
                       console.log(
-                        `[AGG Updater] Updated customerinfo id=${id} with nbr=${finalDescription}`
+                        `[AGG Updater] Updated customerinfo id=${id} with nbr=${finalDescription}`,
                       );
                     } else {
                       await customerinfo.update(
                         { nbr: finalDescription },
-                        { where: { id } }
+                        { where: { id } },
                       );
                     }
                   } else {
                     console.log(
-                      `[AGG Updater] ⚠️ Skipping invalid name for ${nbr}: "${finalDescription}"`
+                      `[AGG Updater] ⚠️ Skipping invalid name for ${nbr}: "${finalDescription}"`,
                     );
                   }
 
@@ -909,7 +956,7 @@ module.exports = (io) => {
             } catch (error) {
               console.error(
                 `[AGG Updater] Error on ${bng.name}:`,
-                error.message
+                error.message,
               );
             }
           }

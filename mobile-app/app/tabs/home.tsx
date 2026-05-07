@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/utils/api";
+import GlobalSearchMobile from "@/componets/GlobalSearchMobile";
 
 interface Stats {
   watchlistCount: number;
@@ -95,13 +96,13 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-slate-900">
-    <ScrollView
-      className="flex-1"
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />
-      }
-    >
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />
+        }
+      >
       {/* HEADER */}
       <View className="flex-row justify-between items-start mb-6">
         <View>
@@ -114,6 +115,7 @@ export default function HomeScreen() {
             className="self-start px-3 py-1 rounded-xl mt-2"
             style={{ backgroundColor: badge.color + "20" }}
           >
+            {/* GLOBAL SEARCH (users, DIA, IPT, Shared) */}
             <Text style={{ color: badge.color }} className="text-xs font-semibold">
               {badge.label}
             </Text>
@@ -139,6 +141,8 @@ export default function HomeScreen() {
           <Text className="text-red-500 font-semibold">Logout</Text>
         </TouchableOpacity>
       </View>
+      <GlobalSearchMobile />
+
 
       {/* STATS */}
       <View className="flex-row gap-3 mb-6">

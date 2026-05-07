@@ -432,3 +432,36 @@ exports.getRoles = async (req, res) => {
     ]
   });
 };
+
+
+exports.registerPushToken = async (req, res) => {
+  try {
+    const { token, platform } = req.body;
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (!token) {
+      return res.status(400).json({ message: "token is required" });
+    }
+
+    const existing = await db.push_tokens.findOne({ where: { token } });
+    const payload = {
+      user_id: req.user.id,
+      contractor_id: req.user.contractor_id || null,
+      platform: platform || null,
+    };
+
+    if (existing) {
+      await existing.update(payload);
+      return res.status(200).json({ message: "Push token updated" });
+    }
+
+    await db.push_tokens.create({
+      ...payload,
+      token,
+    });
+    res.status(201).json({ message: "Push token registered" });
+  } catch (error) {
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};

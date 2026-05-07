@@ -5,6 +5,8 @@ const axios = require("axios");
 const switches = [
   { name: "LTZ-BNG02-TIG-DAR", host: "41.175.38.42" },
   { name: "LTZ-BNG02-RAH-DAR", host: "41.175.38.43" },
+  { name: "LTZ-PE1-RAH", host: "197.155.94.100" },
+  { name: "LTZ-PE1-TIG", host: "197.155.94.138" },
 ];
 
 const sshConfig = {

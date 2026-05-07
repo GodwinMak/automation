@@ -10,6 +10,7 @@ const {
   deleteById,
   getUserById,
   getRoles,
+  registerPushToken,
 } = require("../Controller/user");
 const { verifyToken, adminOnly } = require("../middleware/auth");
 
@@ -33,6 +34,8 @@ router.put("/profile", verifyToken, updateProfile);
 // ============ ADMIN ONLY ROUTES ============
 // Get all users
 router.get("/", verifyToken, adminOnly, getAllUsers);
+
+router.post("/push-token", verifyToken, registerPushToken);
 
 // Create new user
 router.post("/", verifyToken, adminOnly, createUser);

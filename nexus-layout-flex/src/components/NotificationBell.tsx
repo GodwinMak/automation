@@ -28,12 +28,28 @@ interface Notification {
   createdAt: string;
 }
 
+
 export const NotificationBell = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+
+  // Delete all notifications for the user
+  const deleteAllNotifications = async () => {
+    try {
+      const token = localStorage.getItem("userToken");
+      if (!token) return;
+      await axios.delete(`${PRODUCTION_URL}/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch (error) {
+      console.error("Error deleting all notifications:", error);
+    }
+  };
 
   // Fetch unread count periodically
   useEffect(() => {
@@ -280,7 +296,7 @@ export const NotificationBell = () => {
           )}
         </ScrollArea>
         
-        <div className="p-2 border-t border-border">
+        <div className="p-2 border-t border-border flex gap-2">
           <Button
             variant="ghost"
             className="w-full text-sm"
@@ -290,6 +306,15 @@ export const NotificationBell = () => {
             }}
           >
             View all in Watchlist
+          </Button>
+          <Button
+            variant="destructive"
+            className="w-full text-sm"
+            onClick={deleteAllNotifications}
+            disabled={notifications.length === 0}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Clear All
           </Button>
         </div>
       </PopoverContent>

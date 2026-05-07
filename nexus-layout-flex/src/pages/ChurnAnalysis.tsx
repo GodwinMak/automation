@@ -160,10 +160,14 @@ const RISK_COLORS = {
 
 const PAGE_SIZE = 10;
 
+
 export default function ChurnAnalysis() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  // Persist activeTab and riskFilter in localStorage
+  const getInitialTab = () => localStorage.getItem("churn_activeTab") || "overview";
+  const getInitialRisk = () => localStorage.getItem("churn_riskFilter") || null;
+  const [activeTab, setActiveTab] = useState<string>(getInitialTab());
   const [timeRange, setTimeRange] = useState("30");
   const [customerTypeFilter, setCustomerTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -174,7 +178,7 @@ export default function ChurnAnalysis() {
   const [historyPage, setHistoryPage] = useState(1);
 
   // Risk filter for Extended Downtime
-  const [riskFilter, setRiskFilter] = useState<string | null>(null);
+  const [riskFilter, setRiskFilter] = useState<string | null>(getInitialRisk());
 
   // Data states
   const [summary, setSummary] = useState<ChurnSummary | null>(null);
@@ -210,9 +214,31 @@ export default function ChurnAnalysis() {
     }
   };
 
+
+  // Fetch data on mount and when timeRange or customerTypeFilter changes
   useEffect(() => {
     fetchData();
   }, [timeRange, customerTypeFilter]);
+
+  // Auto-reload every 2 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchData();
+    }, 120000); // 2 minutes
+    return () => clearInterval(interval);
+  }, [timeRange, customerTypeFilter, activeTab, riskFilter]);
+
+  // Persist activeTab and riskFilter in localStorage
+  useEffect(() => {
+    localStorage.setItem("churn_activeTab", activeTab);
+  }, [activeTab]);
+  useEffect(() => {
+    if (riskFilter) {
+      localStorage.setItem("churn_riskFilter", riskFilter);
+    } else {
+      localStorage.removeItem("churn_riskFilter");
+    }
+  }, [riskFilter]);
 
   // Navigate to customer view
   const handleViewCustomer = (customer: any) => {
@@ -226,12 +252,14 @@ export default function ChurnAnalysis() {
     });
   };
 
-  // Reset pagination when data changes
+
+  // Reset pagination when data changes, but do not reset riskFilter if it was restored from storage
   useEffect(() => {
     setAtRiskPage(1);
     setDowntimePage(1);
     setHistoryPage(1);
-    setRiskFilter(null); // Also reset risk filter
+    // Only reset riskFilter if not set from storage
+    if (!localStorage.getItem("churn_riskFilter")) setRiskFilter(null);
   }, [timeRange, customerTypeFilter, searchQuery]);
 
   // Reset downtime page when risk filter changes

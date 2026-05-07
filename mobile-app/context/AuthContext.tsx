@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from "react-native";
 import api from '@/utils/api';
-import { loginToZabbix, clearZabbixAuth } from '@/utils/zabbixApi';
+import Constants from "expo-constants";
+import { clearZabbixAuth } from '@/utils/zabbixApi';
 
 interface User {
   id: string;
@@ -109,11 +111,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await SecureStore.setItemAsync('userToken', token);
         await SecureStore.setItemAsync('userData', JSON.stringify(user));
 
-        // Login to Zabbix in the background
-        loginToZabbix().catch(err => {
-          console.error('Zabbix login failed:', err);
-        });
-
         dispatch({ type: 'SIGN_IN', token, userData: user });
       } catch (error: any) {
         dispatch({ type: 'SET_LOADING', isLoading: false });
@@ -123,10 +120,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signOut: async () => {
       await SecureStore.deleteItemAsync('userToken');
       await SecureStore.deleteItemAsync('userData');
+      await SecureStore.deleteItemAsync('zabbixPassword');
       await clearZabbixAuth();
       dispatch({ type: 'SIGN_OUT' });
     },
   };
+
+
+  useEffect(() => {
+    const registerPushToken = async () => {
+      if (!state.userToken || !state.userData?.id) {
+        return;
+      }
+      if (Constants.appOwnership === "expo") {
+        return;
+      }
+
+      console.log("Registering push token for user:", state.userData.id);
+
+      const Notifications = await import("expo-notifications");
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== "granted") {
+        return;
+      }
+
+      const projectId =
+        Constants.easConfig?.projectId ||
+        Constants.expoConfig?.extra?.eas?.projectId ||
+        undefined;
+      const tokenResponse = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined,
+      );
+      const expoToken = tokenResponse?.data;
+      if (!expoToken) {
+        return;
+      }
+
+      const cacheKey = "pushToken";
+      const cached = await SecureStore.getItemAsync(cacheKey);
+      if (cached === expoToken) {
+        return;
+      }
+
+      await api.post(
+        `users/push-token`,
+        { token: expoToken, platform: Platform.OS },
+        { headers: { Authorization: `Bearer ${state.userToken}` } },
+      );
+
+      await SecureStore.setItemAsync(cacheKey, expoToken);
+    };
+
+    registerPushToken();
+  }, [state.userToken, state.userData?.id]);
 
   return (
     <AuthContext.Provider value={authContext}>
@@ -142,4 +188,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

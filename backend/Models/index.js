@@ -46,6 +46,10 @@ db.percentileReports = require("./percentileReport.js")(sequelize, DataTypes);
 db.notifications = require("./notification.js")(sequelize, DataTypes);
 db.diaOverusageReports = require("./diaOverusageReport.js")(sequelize, DataTypes);
 db.pitchForUpgradeReports = require("./pitchForUpgradeReport.js")(sequelize, DataTypes);
+db.switchConfiguration = require("./switchConfiguration.js")(sequelize, DataTypes);
+db.isisAdjacency = require("./isisAdjacent.js")(sequelize, DataTypes);
+db.push_tokens = require("./pushToken.js")(sequelize, DataTypes);
+
 
 
 // Relations
@@ -154,6 +158,26 @@ db.users.hasMany(db.favorites, {
 db.favorites.belongsTo(db.users, {
   foreignKey: "userId",
 });
+
+// Devices <-> Switch Configurations
+db.devices.hasMany(db.switchConfiguration, {
+  foreignKey: "deviceId",
+  onDelete: "CASCADE",
+});
+db.switchConfiguration.belongsTo(db.devices, {
+  foreignKey: "deviceId",
+});
+
+db.devices.hasMany(db.isisAdjacency, {
+  foreignKey: "local_device_id",
+  onDelete: "CASCADE",
+});
+db.isisAdjacency.belongsTo(db.devices, {
+  foreignKey: "local_device_id",
+});
+
+db.users.hasMany(db.push_tokens, { foreignKey: "user_id" });
+db.push_tokens.belongsTo(db.users, { foreignKey: "user_id" });
 
 db.sequelize
   .sync({ force: false })

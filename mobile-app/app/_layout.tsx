@@ -4,6 +4,9 @@ import { Stack, SplashScreen } from "expo-router";
 import React, { useContext, useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
+import { Platform } from "react-native";
+import Constants from "expo-constants";
+
 
 
 export default function RootLayout() {
@@ -24,6 +27,39 @@ export default function RootLayout() {
   // if (!fontsLoaded && !fontsError) {
   //   return null;
   // }
+
+  useEffect(() => {
+      const requestPermissions = async () => {
+        if (Constants.appOwnership === "expo") {
+          return;
+        }
+        const Notifications = await import("expo-notifications");
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowBanner: true,
+            shouldShowList: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+          }),
+        });
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "default",
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: "#FF231F7C",
+            sound: "default",
+          });
+        }
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== "granted") {
+          // Permission denied; notifications will be skipped.
+          return;
+        }
+      };
+
+      requestPermissions();
+    }, []);
   return (
     <AuthProvider>
       <StatusBar style="light" />

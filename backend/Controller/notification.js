@@ -203,6 +203,16 @@ exports.createStatusChangeNotification = async (customerData) => {
 
     await Notification.bulkCreate(notifications);
 
+    // Emit notification to each user
+    try {
+      const { emitNotificationToUser } = require("../emitNotificationToUser");
+      notifications.forEach((notif) => {
+        emitNotificationToUser(notif.userId, notif);
+      });
+    } catch (e) {
+      console.error("[NOTIFICATION] Error emitting socket notification:", e);
+    }
+
     console.log(`[NOTIFICATION] Created ${notifications.length} notifications for ${customerName} going down`);
 
     return { created: notifications.length };

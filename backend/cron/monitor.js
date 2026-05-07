@@ -39,6 +39,23 @@ module.exports = () => {
       const results = await Promise.all(pingPromises);
       // 3. Process results and log status
       console.log("\n--- Device Status Report ---");
+
+      // Push notification logic for favorites
+      const sendPushNotification = require("../utils/sendPushNotification");
+      const Favorite = db.favorites;
+      const Devices = db.devices;
+      const downDevices = results.filter(r => !r.isUp);
+      for (const down of downDevices) {
+        // Find all favorites for this device
+        const favorites = await Favorite.findAll({ where: { customerName: down.name } });
+        for (const fav of favorites) {
+          if (fav.userId) {
+            const tokens = await sendPushNotification.getTokensForUser(fav.userId);
+            const message = `WATCHLIST DOWN: ${down.name} (${down.ip}) is DOWN`;
+            await sendPushNotification(tokens, "Watchlist Down", message);
+          }
+        }
+      }
       results.forEach((result) => {
         if (result.isUp) {
         //   console.log(`✅ ${result.name}  ${result.ip} is UP`);

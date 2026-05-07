@@ -34,6 +34,9 @@ import WithTagDIA from "./pages/WithTagDIA";
 import UserManagement from "./pages/UserManagement";
 import DiaOverusageReport from "./pages/DiaOverusageReport";
 import PitchForUpgrade from "./pages/PitchForUpgrade";
+import SwitchConfigurations from "./pages/SwitchConfigurations";
+import SwitchMap from "./pages/SwitchMap";
+import IsisImpactAnalyzer from "./pages/IsisImpactAnalyzer";
 
 const queryClient = new QueryClient();
 
@@ -260,9 +263,33 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route
+                    path="/switch-configurations"
+                    element={
+                      <ProtectedRoute requiredPermission="canConfigureCustomers">
+                        <SwitchConfigurations />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/switch-map"
+                    element={
+                      <ProtectedRoute>
+                        <SwitchMap />
+                      </ProtectedRoute>
+                    }
+                  />
 
                   <Route path="*" element={<NotFound />} />
                 </Route>
+                <Route
+                    path="/isis-impact"
+                    element={
+                      <ProtectedRoute>
+                        <IsisImpactAnalyzer />
+                      </ProtectedRoute>
+                    }
+                  />
               </Routes>
             </BrowserRouter>
           </TooltipProvider>

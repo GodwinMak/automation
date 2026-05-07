@@ -62,8 +62,14 @@ export function Navbar() {
   const [updateStatus, setUpdateStatus] = useState(UPDATE_STATUS.IDLE);
 
   useEffect(() => {
+
     const socket = io(`${PRODUCTION_URL}`);
     socketRef.current = socket;
+
+    // Register userId with backend for targeted notifications
+    if (user && user.id) {
+      socket.emit("register", user.id);
+    }
 
     // Create an Audio instance for the notification sound
     const audio = new Audio("/notification.mp3");

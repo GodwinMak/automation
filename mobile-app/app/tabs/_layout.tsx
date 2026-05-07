@@ -47,7 +47,22 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <View className="items-center">
               <Ionicons 
-                name={focused ? "star" : "star-outline"} 
+                name={focused ? "list-circle" : "list-circle-outline"} 
+                size={22} 
+                color={color} 
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="isis-impact"
+        options={{
+          tabBarLabel: "ISIS Impact",
+          tabBarIcon: ({ color, focused }) => (
+            <View className="items-center">
+              <Ionicons 
+                name={focused ? "git-network" : "git-network-outline"} 
                 size={22} 
                 color={color} 
               />

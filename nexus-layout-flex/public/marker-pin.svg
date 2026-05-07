@@ -1,0 +1,10 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="pinGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(32 20) rotate(90) scale(18 18)">
+      <stop offset="0" stop-color="#4fd1c5"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </radialGradient>
+  </defs>
+  <path d="M32 4C21.402 4 12.8 12.602 12.8 23.2C12.8 37.6 32 60 32 60C32 60 51.2 37.6 51.2 23.2C51.2 12.602 42.598 4 32 4Z" fill="url(#pinGlow)"/>
+  <circle cx="32" cy="23" r="7.5" fill="#f8fafc"/>
+</svg>

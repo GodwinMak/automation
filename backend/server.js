@@ -35,6 +35,9 @@ const exportRoutes = require("./routes/export");
 const diagnosisRoutes = require("./routes/diagnosis");
 const diaOverusageRoutes = require("./routes/diaOverusage");
 const pitchForUpgradeRoutes = require("./routes/pitchForUpgrade");
+const switchConfigurationRoutes = require("./routes/switchConfiguration");
+const isisAdjacentRoutes = require("./routes/isisAdjacent");
+const pushTokenRoutes = require("./routes/pushToken");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -58,18 +61,47 @@ app.use("/dia-overusage", diaOverusageRoutes);
 app.use('/pitch-for-upgrade', pitchForUpgradeRoutes);
 // app.use("/ml", require("./routes/ml.js"));
 app.use("/export", exportRoutes);
+app.use("/switch-configurations", switchConfigurationRoutes);
+app.use("/isis-adjacency", isisAdjacentRoutes);
+app.use("/push-token", pushTokenRoutes);
 
 
 const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
+const { setUserSockets } = require("./emitNotificationToUser");
 const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io);
 const { updateShared } = require("./cron/updateShared")(io);
 const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
 const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
 const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
+const {updateSwitchConfiguration} = require("./cron/switchConfiguration.js")(io);
 
 // Socket for SSH
+
+// Map userId to a set of sockets
+const userSockets = new Map();
+setUserSockets(userSockets);
+
 io.on("connection", (socket) => {
   console.log("Web client connected");
+
+  // Listen for user registration (client should emit 'register' with userId after connecting)
+  socket.on("register", (userId) => {
+    if (!userId) return;
+    if (!userSockets.has(userId)) userSockets.set(userId, new Set());
+    userSockets.get(userId).add(socket);
+    socket.userId = userId;
+    console.log(`[Socket] Registered user ${userId}`);
+  });
+
+  // Clean up on disconnect
+  socket.on("disconnect", () => {
+    if (socket.userId && userSockets.has(socket.userId)) {
+      userSockets.get(socket.userId).delete(socket);
+      if (userSockets.get(socket.userId).size === 0) {
+        userSockets.delete(socket.userId);
+      }
+    }
+  });
 
   socket.on("connectDevice", async ({ deviceId, username, password }) => {
     // Check if username is provided before attempting to connect
@@ -120,12 +152,13 @@ io.on("connection", (socket) => {
       });
   });
 
+
   // 🎯 NEW: Listener for manual update call
   socket.on("manualDiaUpdate", async () => {
     console.log("========================================");
     console.log("🔥 Received manual 'updateDIA' call from frontend.");
     console.log("========================================");
-    
+    // await updateSwitchConfiguration();
     // Execute the update logic
     await updateDIA();
     await updateAggDevices(); 
@@ -145,6 +178,7 @@ io.on("connection", (socket) => {
     console.log("🔥 Received manual 'updateShared' call from frontend.");
     console.log("========================================");
 
+// await updateSwitchConfiguration();
     await updateShared();
 
     io.emit("sharedUpdateComplete");
@@ -167,6 +201,8 @@ require("./cron/updateIPT")(io);
 require("./cron/updateShared")(io);
 require("./cron/cleanupStaleCustomers")(io);
 require("./cron/uptimeTracker");
+// require("./cron/switchConfiguration.js")(io);
+require("./cron/isisAdjacent")(io);
 scheduleDiaOverusageCron();
 schedulePitchForUpgradeCron();
 

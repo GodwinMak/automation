@@ -13,6 +13,14 @@ module.exports = (sequelize, DataTypes) =>{
       name: {
         type: DataTypes.STRING,
         allowNull: false,
+      },
+      lat:{
+        type: DataTypes.DECIMAL(10, 6),
+        allowNull: true
+      },
+      long:{
+        type: DataTypes.DECIMAL(10, 6),
+        allowNull: true
       }
     })
 }

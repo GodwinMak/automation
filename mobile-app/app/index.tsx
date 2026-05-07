@@ -12,8 +12,28 @@ import { useAuth } from '@/context/AuthContext';
 import * as Network from "expo-network";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from "@/componets/CustomButton";
+// import * as Updates from "expo-updates";
+
 
 export default function Index() {
+
+  // async function onFetchUpdateAsync() {
+  //   try {
+  //     const update = await Updates.checkForUpdateAsync();
+
+  //     if (update.isAvailable) {
+  //       await Updates.fetchUpdateAsync();
+  //       await Updates.reloadAsync();
+  //     }
+  //   } catch (error) {
+  //     // You can also add an alert() to see the error message in case of an error when fetching updates.
+  //     alert(`Error fetching latest Expo update: ${error}`);
+  //   }
+  // }
+  // useEffect(()=>{
+  //   onFetchUpdateAsync();
+  // },[])
+  
   const [isConnected, setIsConnected] = useState(null);
   const { state } = useAuth();
 
@@ -64,7 +84,7 @@ export default function Index() {
           {/* <Image source={images.logo} className="w-[200px] h-[94px] mb-10" /> */}
           <View className="relative -mt-4">
             <Text className="text-2xl text-black font-bold text-center">
-              CUSTOMER RELATION PORTAL <Text className="text-blue-900">CRP</Text>
+              NETWORK MONITORING <Text className="text-blue-900">APP</Text>
             </Text>
           </View>
           <CustomButton

@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 
 // Update this to your production server IP
-export const API_URL = 'http://10.22.89.219:4000';
+export const API_URL = 'https://automation.liquidmatics.co.tz';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -39,6 +39,17 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+
+// Register Expo push token
+export async function registerPushToken(token: string, platform?: string) {
+  try {
+    await api.post('/push-token', { token, platform });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 export default api;
 

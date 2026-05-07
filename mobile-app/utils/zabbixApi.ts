@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 const ZABBIX_API_URL = 'https://monitoring.liquidtelecom.net/api_jsonrpc.php';
 
-// Zabbix credentials from environment variables
+// Fallback credentials from environment (for system/admin login if needed)
 const ZABBIX_USERNAME = process.env.EXPO_PUBLIC_ZABBIX_USERNAME || '';
 const ZABBIX_PASSWORD = process.env.EXPO_PUBLIC_ZABBIX_PASSWORD || '';
 
@@ -36,16 +36,18 @@ export const zabbixApi = async (payload: ZabbixPayload) => {
   );
   
   if (res.data.error) {
-    throw new Error(res.data.error.message || 'Zabbix API error');
+    throw new Error(res.data.error.data || res.data.error.message || 'Zabbix API error');
   }
   
   return res.data.result;
 };
 
 /**
- * Login to Zabbix and store auth token
+ * Login to Zabbix with provided credentials and store auth token
+ * @param username - Zabbix username (typically email)
+ * @param password - Zabbix password (provided by user during login)
  */
-export const loginToZabbix = async (): Promise<string | null> => {
+export const loginToZabbix = async (username: string, password: string): Promise<string | null> => {
   try {
     // Clear any existing auth
     await SecureStore.deleteItemAsync('zabbixAuth');
@@ -56,8 +58,8 @@ export const loginToZabbix = async (): Promise<string | null> => {
         jsonrpc: '2.0',
         method: 'user.login',
         params: {
-          username: ZABBIX_USERNAME,
-          password: ZABBIX_PASSWORD,
+          username: username,
+          password: password,
         },
         id: 1,
       },
@@ -68,22 +70,35 @@ export const loginToZabbix = async (): Promise<string | null> => {
         },
       }
     );
-    // console.log(response.data);
+    
+    if (response.data.error) {
+      console.error('Zabbix login error:', response.data.error);
+      return null;
+    }
     
     if (response.data.result) {
       await SecureStore.setItemAsync('zabbixAuth', response.data.result);
       console.log('Zabbix login successful');
-    //   console.log("zabbixAuth", await SecureStore.getItemAsync('zabbixAuth'));
       return response.data.result;
     }
 
-
-    
     return null;
   } catch (error) {
     console.error('Zabbix login failed:', error);
     return null;
   }
+};
+
+/**
+ * Login to Zabbix with system credentials (fallback for background tasks)
+ */
+export const loginToZabbixWithSystemCredentials = async (): Promise<string | null> => {
+  if (!ZABBIX_USERNAME || !ZABBIX_PASSWORD) {
+    console.warn('Zabbix system credentials not configured');
+    return null;
+  }
+
+  return loginToZabbix(ZABBIX_USERNAME, ZABBIX_PASSWORD);
 };
 
 /**
@@ -94,10 +109,18 @@ export const getZabbixAuth = async (): Promise<string | null> => {
 };
 
 /**
+ * Get the stored Zabbix password
+ */
+export const getZabbixPassword = async (): Promise<string | null> => {
+  return await SecureStore.getItemAsync('zabbixPassword');
+};
+
+/**
  * Clear Zabbix auth token (on logout)
  */
 export const clearZabbixAuth = async (): Promise<void> => {
   await SecureStore.deleteItemAsync('zabbixAuth');
+  await SecureStore.deleteItemAsync('zabbixPassword');
 };
 
 /**
@@ -254,4 +277,3 @@ export const formatBytes = (bytes: number, unit: string = 'bps'): string => {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
-

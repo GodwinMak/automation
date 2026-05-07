@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "982479874037",
+    "project_id": "mobile-app-gpon",
+    "storage_bucket": "mobile-app-gpon.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:982479874037:android:99775b966e274e359362bc",
+        "android_client_info": {
+          "package_name": "com.godwinmak.mobileapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8uiwePwxwLARb5FvHcSQW29HFqRGpKiM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:982479874037:android:583b0538f68f302e9362bc",
+        "android_client_info": {
+          "package_name": "com.godwinmak.monitoringapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA8uiwePwxwLARb5FvHcSQW29HFqRGpKiM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

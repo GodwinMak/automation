@@ -21,6 +21,9 @@ import {
   UserCog,
   Tag,
   AlertTriangle,
+  FileText,
+  MapPin,
+  Activity,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -64,6 +67,18 @@ const allNavigationItems: NavigationItem[] = [
     icon: Users,
   },
   {
+    title: "Switch Map",
+    url: "/switch-map",
+    icon: MapPin,
+  },
+  {
+    title: "ISIS Impact",
+    url: "/isis-impact",
+    icon: Activity,
+    permission: "canViewUptimeTrends",
+
+  },
+  {
     title: "Customers",
     children: [
       { title: "DIA Customers", url: "/dia-customer", icon: PieChart },
@@ -85,6 +100,12 @@ const allNavigationItems: NavigationItem[] = [
         title: "DIA WITH TAG",
         url: "/with-tag-dia",
         icon: Tag,
+        permission: "canConfigureCustomers",
+      },
+      {
+        title: "Switch Configs",
+        url: "/switch-configurations",
+        icon: FileText,
         permission: "canConfigureCustomers",
       },
     ],
