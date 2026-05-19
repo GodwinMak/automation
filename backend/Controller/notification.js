@@ -174,6 +174,11 @@ exports.createStatusChangeNotification = async (customerData) => {
       return { created: 0 };
     }
 
+    // FTTH status changes are handled by the dedicated ftthDailyChecker cron — skip here
+    if (customerType === "FTTH") {
+      return { created: 0 };
+    }
+
     // Find all users who have this customer in their watchlist
     const favorites = await Favorite.findAll({
       where: {

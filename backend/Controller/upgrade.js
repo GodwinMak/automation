@@ -2,6 +2,8 @@ const db = require("../Models");
 const schedule = require("node-schedule");
 const { Client } = require("ssh2");
 const ms = require("ms");
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
+
 
 const customerinfos = db.customerinfos;
 const User = db.users;
@@ -619,10 +621,9 @@ exports.upgradeCustomer = async (req, res) => {
         try {
           for (const sw of switches) {
             console.log(`[Downgrade] Reverting on ${sw.name} (${sw.host})`);
-            // Use the credentials from the request to the main endpoint for auto-downgrade
             await executeJunosUpgrade(
               sw.host,
-              { username, password },
+              { username: process.env.SSH_USERNAME, password: process.env.SSH_PASSWORD },
               old_upmbps,
               old_downmbps,
               intfName
@@ -658,8 +659,8 @@ exports.upgradeCustomer = async (req, res) => {
 
 exports.rescheduleJobs = async () => {
   const sshConfig = {
-    username: "godwin.makyao",
-    password: "Namwel200148#@!",
+    username: process.env.SSH_USERNAME,
+    password: process.env.SSH_PASSWORD,
   };
   try {
     const temporaryUpgrades = await customerinfos.findAll({

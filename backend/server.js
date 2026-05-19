@@ -9,13 +9,18 @@ const Device = db.devices;
 const path = require("path")
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: (origin, callback) => callback(null, origin || true),
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { cors: { origin: (origin, cb) => cb(null, origin || true), credentials: true } });
 
 const deviceRoutes = require("./routes/device");
 const upgradeRoutes = require("./routes/upgrade");
@@ -38,6 +43,9 @@ const pitchForUpgradeRoutes = require("./routes/pitchForUpgrade");
 const switchConfigurationRoutes = require("./routes/switchConfiguration");
 const isisAdjacentRoutes = require("./routes/isisAdjacent");
 const pushTokenRoutes = require("./routes/pushToken");
+const l3vpnCustomerRoutes = require("./routes/l3vpncustomer");
+const ftthCustomerRoutes = require("./routes/ftthcustomer");
+const ftthReportRoutes = require("./routes/ftthReport");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -64,6 +72,9 @@ app.use("/export", exportRoutes);
 app.use("/switch-configurations", switchConfigurationRoutes);
 app.use("/isis-adjacency", isisAdjacentRoutes);
 app.use("/push-token", pushTokenRoutes);
+app.use("/l3vpncustomers", l3vpnCustomerRoutes);
+app.use("/ftthcustomers", ftthCustomerRoutes);
+app.use("/ftth-reports", ftthReportRoutes);
 
 
 const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
@@ -73,7 +84,10 @@ const { updateShared } = require("./cron/updateShared")(io);
 const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
 const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
 const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
+const { scheduleFTTHDailyCheck } = require("./cron/ftthDailyChecker");
 const {updateSwitchConfiguration} = require("./cron/switchConfiguration.js")(io);
+const {updateL3VPN} = require("./cron/updateL3VPN.js")(io);
+const {updateFTTHData} = require("./cron/updateFTTH.js")(io);
 
 // Socket for SSH
 
@@ -104,9 +118,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("connectDevice", async ({ deviceId, username, password }) => {
-    // Check if username is provided before attempting to connect
+    // Check if username and password are provided before attempting to connect
     if (!username) {
       return socket.emit("output", "Error: Username not provided.\n");
+    }
+    if (!password) {
+      return socket.emit("output", "Error: Password not provided.\n");
     }
 
     const device = await Device.findByPk(deviceId);
@@ -167,7 +184,9 @@ io.on("connection", (socket) => {
     await updateAggDevicesIPT();
 
     await updateShared();
-    
+
+    await updateL3VPN();
+    await updateFTTHData();
     // 🎯 Notify the client that the update is complete (to enable the button)
     io.emit("diaUpdateComplete"); 
   });
@@ -196,15 +215,12 @@ io.on("connection", (socket) => {
   });
 });
 
-require("./cron/updateDIA")(io);
-require("./cron/updateIPT")(io);
-require("./cron/updateShared")(io);
-require("./cron/cleanupStaleCustomers")(io);
 require("./cron/uptimeTracker");
 // require("./cron/switchConfiguration.js")(io);
 require("./cron/isisAdjacent")(io);
 scheduleDiaOverusageCron();
 schedulePitchForUpgradeCron();
+scheduleFTTHDailyCheck();
 
 // Initialize status tracker cache
 const { initializeCache } = require("./utils/statusTracker");

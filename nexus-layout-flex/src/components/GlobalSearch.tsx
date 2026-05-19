@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, X, Network, Globe, Share2, ArrowRight, Loader2 } from "lucide-react";
+import { Search, X, Network, Globe, Share2, Route, Wifi, ArrowRight, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -13,7 +13,7 @@ interface SearchResult {
   nbr: string;
   status: string;
   switchName: string;
-  type: "DIA" | "IPT" | "Shared";
+  type: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH";
   route: string;
   data: any;
 }
@@ -117,6 +117,10 @@ export const GlobalSearch = () => {
       navigate(result.route, { state: { customer: result.data } });
     } else if (result.type === "Shared") {
       navigate(result.route, { state: { customer: result.data } });
+    } else if (result.type === "L3VPN") {
+      navigate(result.route, { state: { customer: result.data } });
+    } else if (result.type === "FTTH") {
+      navigate(result.route, { state: { customer: result.data } });
     }
   };
 
@@ -128,6 +132,10 @@ export const GlobalSearch = () => {
         return <Globe className="h-4 w-4 text-purple-500" />;
       case "Shared":
         return <Share2 className="h-4 w-4 text-orange-500" />;
+      case "L3VPN":
+        return <Route className="h-4 w-4 text-green-500" />;
+      case "FTTH":
+        return <Wifi className="h-4 w-4 text-teal-500" />;
       default:
         return <Network className="h-4 w-4" />;
     }
@@ -141,6 +149,10 @@ export const GlobalSearch = () => {
         return "bg-purple-500/10 text-purple-500 border-purple-500/20";
       case "Shared":
         return "bg-orange-500/10 text-orange-500 border-orange-500/20";
+      case "L3VPN":
+        return "bg-green-500/10 text-green-500 border-green-500/20";
+      case "FTTH":
+        return "bg-teal-500/10 text-teal-500 border-teal-500/20";
       default:
         return "bg-muted text-muted-foreground";
     }

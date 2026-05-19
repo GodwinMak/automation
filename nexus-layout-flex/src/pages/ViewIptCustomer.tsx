@@ -3,7 +3,7 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Network } from "lucide-react";
+import { Network, Stethoscope } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ import {
   LineElement,
   Tooltip,
   Legend,
+  Title,
 } from "chart.js";
 
 ChartJS.register(
@@ -41,7 +42,8 @@ ChartJS.register(
   PointElement,
   LineElement,
   Tooltip,
-  Legend
+  Legend,
+  Title
 );
 
 const ViewIptCustomer = () => {
@@ -57,11 +59,14 @@ const ViewIptCustomer = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
 
+  // Diagnosis state
+  const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [diagnosisResult, setDiagnosisResult] = useState<any>(null);
+  const [diagnosisError, setDiagnosisError] = useState("");
+
   // Detect if coming from Watchlist (flat data without nested iptcustomer)
   const isFromWatchlist = customerInfo?.customer && !customerInfo?.customer?.iptcustomer;
-
-  console.log(isFromWatchlist);
-
 
   // Fetch full customer data if coming from Watchlist
   useEffect(() => {
@@ -157,6 +162,26 @@ const ViewIptCustomer = () => {
       alert(error.response?.data?.message || "Update failed");
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  const handleDiagnosis = async () => {
+    setDiagnosisResult(null);
+    setDiagnosisError("");
+    setDiagnosisLoading(true);
+    setIsDiagnosisModalOpen(true);
+    try {
+      const res = await axios.post(`${PRODUCTION_URL}/diagnosis/ipt`, {
+        interfaceName: customerData.interface,
+      });
+      setDiagnosisResult(res.data);
+      console.log(res.data)
+    } catch (err: any) {
+      setDiagnosisError(
+        err.response?.data?.message || err.message || "Diagnosis failed."
+      );
+    } finally {
+      setDiagnosisLoading(false);
     }
   };
 
@@ -359,6 +384,14 @@ const ViewIptCustomer = () => {
               nbr={customer?.nbr}
             />
             <Button
+              onClick={handleDiagnosis}
+              disabled={diagnosisLoading}
+              className="bg-orange-600 hover:bg-orange-700 text-white font-semibold"
+            >
+              <Stethoscope className="w-4 h-4 mr-2" />
+              {diagnosisLoading ? "Diagnosing..." : "Diagnose"}
+            </Button>
+            <Button
               onClick={() => setIsEditModalOpen(true)}
               className="bg-secondary hover:bg-secondary/90 text-secondary-foreground font-semibold"
             >
@@ -415,6 +448,206 @@ const ViewIptCustomer = () => {
           </div>
         )} */}
       </main>
+
+      {/* Diagnosis Modal */}
+      <Dialog open={isDiagnosisModalOpen} onOpenChange={setIsDiagnosisModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Stethoscope className="w-5 h-5 text-orange-500" />
+              IPT Customer Diagnosis
+            </DialogTitle>
+            <DialogDescription>
+              {customerData.interface} — {customerData.switchName}
+            </DialogDescription>
+          </DialogHeader>
+
+          {diagnosisLoading && (
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
+              <p className="text-muted-foreground">Running diagnosis, please wait...</p>
+            </div>
+          )}
+
+          {diagnosisError && !diagnosisLoading && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+              <p className="text-red-500 font-medium">{diagnosisError}</p>
+            </div>
+          )}
+
+          {diagnosisResult && !diagnosisLoading && (() => {
+            const r = diagnosisResult;
+
+            // --- Graph rendering ---
+            const graphDataObj = r.graphData;
+            let graphSection: React.ReactNode = null;
+            if (graphDataObj?.sentData?.length || graphDataObj?.recvData?.length) {
+              const sentRaw: { clock: string; value: string }[] = graphDataObj.sentData || [];
+              const recvRaw: { clock: string; value: string }[] = graphDataObj.recvData || [];
+              const allValues = [...sentRaw, ...recvRaw].map((d) => parseFloat(d.value));
+              const maxVal = Math.max(...allValues, 0);
+              let divisor = 1;
+              let unit = "bps";
+              if (maxVal >= 1e9) { divisor = 1e9; unit = "Gbps"; }
+              else if (maxVal >= 1e6) { divisor = 1e6; unit = "Mbps"; }
+              else if (maxVal >= 1e3) { divisor = 1e3; unit = "Kbps"; }
+
+              const labels = sentRaw.map((d) =>
+                new Date(parseInt(d.clock) * 1000).toLocaleTimeString()
+              );
+
+              const sentValues = sentRaw.map((d) => parseFloat(d.value) / divisor);
+              const recvValues = recvRaw.map((d) => parseFloat(d.value) / divisor);
+
+              const sorted95 = (arr: number[]) => {
+                if (!arr.length) return 0;
+                const s = [...arr].sort((a, b) => a - b);
+                return s[Math.floor(s.length * 0.95)];
+              };
+              const p95Sent = sorted95(sentValues);
+              const p95Recv = sorted95(recvValues);
+
+              const upCap = customer?.upmbps ? parseFloat(customer.upmbps) : null;
+              const downCap = customer?.downmbps ? parseFloat(customer.downmbps) : null;
+
+              graphSection = (
+                <div className="mt-6">
+                  <h4 className="font-semibold text-foreground mb-3">Traffic Graph (Last 6h)</h4>
+                  <Line
+                    data={{
+                      labels,
+                      datasets: [
+                        {
+                          label: `Sent (${unit})`,
+                          data: sentValues,
+                          borderColor: "rgb(59,130,246)",
+                          backgroundColor: "rgba(59,130,246,0.1)",
+                          borderWidth: 2,
+                          pointRadius: 0,
+                          tension: 0.3,
+                        },
+                        {
+                          label: `Received (${unit})`,
+                          data: recvValues,
+                          borderColor: "rgb(34,197,94)",
+                          backgroundColor: "rgba(34,197,94,0.1)",
+                          borderWidth: 2,
+                          pointRadius: 0,
+                          tension: 0.3,
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      plugins: {
+                        legend: { position: "top" },
+                        title: { display: true, text: `Interface Traffic — ${customerData.interface}` },
+                      },
+                      scales: {
+                        y: { beginAtZero: true, title: { display: true, text: unit } },
+                        x: { ticks: { maxTicksLimit: 10 } },
+                      },
+                    }}
+                  />
+                  <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded p-3">
+                      <p className="text-blue-400 font-medium">P95 Sent</p>
+                      <p className="text-foreground font-semibold">{p95Sent.toFixed(2)} {unit}</p>
+                      {upCap && (
+                        <p className={`text-xs mt-1 ${p95Sent / divisor * 1e6 > upCap * 0.9 * 1e6 ? "text-red-400" : "text-muted-foreground"}`}>
+                          Capacity: {upCap} Mbps {p95Sent * (divisor === 1e6 ? 1 : divisor / 1e6) > upCap * 0.9 ? "⚠ Near limit" : "✓ OK"}
+                        </p>
+                      )}
+                    </div>
+                    <div className="bg-green-500/10 border border-green-500/20 rounded p-3">
+                      <p className="text-green-400 font-medium">P95 Received</p>
+                      <p className="text-foreground font-semibold">{p95Recv.toFixed(2)} {unit}</p>
+                      {downCap && (
+                        <p className={`text-xs mt-1 ${p95Recv * (divisor === 1e6 ? 1 : divisor / 1e6) > downCap * 0.9 ? "text-red-400" : "text-muted-foreground"}`}>
+                          Capacity: {downCap} Mbps {p95Recv * (divisor === 1e6 ? 1 : divisor / 1e6) > downCap * 0.9 ? "⚠ Near limit" : "✓ OK"}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {/* Status */}
+                <p className="font-semibold text-primary text-base">{r.message}</p>
+
+                {/* Customer IP + ASN */}
+                {r.customerIp && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-card border border-border rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground">Customer IP</p>
+                      <p className="font-semibold text-foreground">{r.customerIp}</p>
+                    </div>
+                    <div className="bg-card border border-border rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground">BGP ASN</p>
+                      <p className="font-semibold text-foreground">{r.customerAsn || "Not found"}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* BGP Routes */}
+                {r.bgpRoutes?.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-foreground mb-2">
+                      BGP Routes Received ({r.bgpRouteCount})
+                    </h4>
+                    <div className="bg-muted/30 border border-border rounded-lg p-3 max-h-48 overflow-y-auto">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                        {r.bgpRoutes.map((route: string, i: number) => (
+                          <span key={i} className="text-xs font-mono bg-card border border-border rounded px-2 py-1">
+                            {route}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {r.customerAsn && !r.bgpRoutes?.length && (
+                  <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                    <p className="text-yellow-500 text-sm">BGP session found but no routes received.</p>
+                  </div>
+                )}
+
+                {/* Neighbor details (shown when down) */}
+                {r.flappedInfo && (
+                  <div className="bg-card border border-border rounded-lg p-4 space-y-2">
+                    <h4 className="font-semibold text-foreground">Neighbor Info</h4>
+                    {r.customerPort && <p className="text-sm"><span className="text-muted-foreground">Port:</span> {r.customerPort}</p>}
+                    {r.neighborSwitch && (
+                      <p className="text-sm"><span className="text-muted-foreground">Neighbor Switch:</span> {r.neighborSwitch.name || r.neighborSwitch.ip}</p>
+                    )}
+                    {typeof r.flappedInfo === "object" && !Array.isArray(r.flappedInfo) ? (
+                      <p className="text-sm"><span className="text-muted-foreground">Last Flapped:</span> {r.flappedInfo.lastFlapped} ({r.flappedInfo.durationAgo} ago)</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{String(r.flappedInfo)}</p>
+                    )}
+                    {r.mediaType && <p className="text-sm"><span className="text-muted-foreground">Media:</span> {r.mediaType}</p>}
+                    {Array.isArray(r.powerInfo) && r.powerInfo.map((p: any, i: number) => (
+                      <p key={i} className="text-sm">
+                        <span className="text-muted-foreground">{p.label}:</span> {p.mW} mW / {p.dBm} dBm
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {graphSection}
+              </div>
+            );
+          })()}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDiagnosisModalOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Graph Modal */}
       <Dialog open={isGraphModalOpen} onOpenChange={setIsGraphModalOpen}>

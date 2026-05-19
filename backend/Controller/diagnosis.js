@@ -1,6 +1,8 @@
 const db = require("../Models");
 const { Client } = require("ssh2");
 const axios = require("axios");
+const { exec } = require("child_process");
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const switches = [
   { name: "LTZ-BNG02-TIG-DAR", host: "41.175.38.42" },
@@ -9,9 +11,20 @@ const switches = [
   { name: "LTZ-PE1-TIG", host: "197.155.94.138" },
 ];
 
+const peSwitches = [
+  { name: "LTZ-PE1-RAH", host: "197.155.94.100" },
+  { name: "LTZ-PE1-TIG", host: "197.155.94.138" },
+];
+
+const iptSwitches =[
+  { name: "LTZ-PE1-RAH", host: "197.155.94.100" },
+  { name: "LTZ-PE1-TIG", host: "197.155.94.138" },
+  { name: "LTZ-P1-DAR", host: "197.155.94.114" }
+]
+
 const sshConfig = {
-  username: "godwin.makyao",
-  password: "Namwel200148#@!",
+  username: process.env.SSH_USERNAME,
+  password: process.env.SSH_PASSWORD,
 };
 
 const diacustomer = db.diacustomers;
@@ -145,10 +158,14 @@ exports.diagnosisController = async (req, res) => {
         graphData: zabbixData
       });
     }else{
-      const zabbixData = await getZabbixHistory(interfaceName, activeIntf.switchName);
+      const [neighborData, zabbixData] = await Promise.all([
+        getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+        getZabbixHistory(interfaceName, activeIntf.switchName)
+      ]);
       return res.status(200).json({
         message: "Customer is healthy",
         pingResults,
+        ...neighborData,
         graphData: zabbixData
       });
     }
@@ -158,8 +175,329 @@ exports.diagnosisController = async (req, res) => {
   }
 };
 
+exports.l3vpnDiagnosisController = async (req, res) => {
+  const { interfaceName } = req.body;
+
+  try {
+    const l3vpncustomerinfo = db.l3vpncustomerinfos;
+    const l3vpncustomer = db.l3vpncustomers;
+
+    const customerInfo = await l3vpncustomerinfo.findOne({
+      where: { interface: interfaceName },
+      include: [{ model: l3vpncustomer, attributes: ["operationalStatus", "switchName"] }],
+    });
+
+    if (!customerInfo) return res.status(404).json({ message: "Customer not found" });
+
+    const routeInstance = customerInfo.route_instance;
+
+    // 1. Parallel check across all PEs
+    const peResults = await Promise.all(
+      peSwitches.map(async (sw) => {
+        const cmd = `show interfaces descriptions | match ${interfaceName}`;
+        const output = await runCommand(sw.host, cmd);
+        return parseInterfaces(output, sw.name, sw.host);
+      })
+    );
+
+    const allInterfaces = peResults.flat();
+    const activeIntf = allInterfaces.find(i => i.operationalStatus === "up") || allInterfaces[0];
+
+    if (!activeIntf) return res.status(404).json({ message: "No interface data found" });
+
+    // --- CASE: DOWN ---
+    if (activeIntf.operationalStatus === "down") {
+      const [neighborData, zabbixData] = await Promise.all([
+        getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+        getZabbixHistory(interfaceName, activeIntf.switchName)
+      ]);
+      return res.status(200).json({
+        message: "Customer is down",
+        interface: interfaceName,
+        switchName: activeIntf.switchName,
+        graphData: zabbixData,
+        ...neighborData
+      });
+    }
+
+    // 2. Get ARP using routing-instance
+    const arpCmd =`show arp no-resolve interface ${interfaceName}`;
+
+    const arpOutput = await runCommand(activeIntf.host, arpCmd);
+    // Match lines: <MAC>  <IP>  <interface>  <flags>
+    const arpLineRegex = /^[0-9a-f]{2}(?::[0-9a-f]{2}){5}\s+(\d{1,3}(?:\.\d{1,3}){3})/gim;
+    const customerIps = [...arpOutput.matchAll(arpLineRegex)].map(m => m[1]);
+
+    if (customerIps.length === 0) {
+      const [neighborData, zabbixData] = await Promise.all([
+        getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+        getZabbixHistory(interfaceName, activeIntf.switchName)
+      ]);
+      return res.status(200).json({
+        message: "Customer is up but no IPs found in ARP",
+        interface: interfaceName,
+        switchName: activeIntf.switchName,
+        routeInstance: routeInstance || null,
+        graphData: zabbixData,
+        ...neighborData
+      });
+    }
+
+    // 3. Ping IPs in parallel using routing-instance
+    const pingResults = await Promise.all(customerIps.map(async (ip) => {
+      const pingCmd = routeInstance
+        ? `ping routing-instance ${routeInstance} ${ip} rapid count 100`
+        : `ping ${ip} rapid count 100`;
+      const pingOutput = await runCommand(activeIntf.host, pingCmd);
+      return parsePing(ip, pingOutput);
+    }));
+
+    const problematicPing = pingResults.find(p => p.packetLoss > 20 || p.avgLatency > 25);
+
+    const [neighborData, zabbixData] = await Promise.all([
+      getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+      getZabbixHistory(interfaceName, activeIntf.switchName)
+    ]);
+
+    if (problematicPing) {
+      return res.status(200).json({
+        message: "Customer is up but experiencing issues",
+        interface: interfaceName,
+        switchName: activeIntf.switchName,
+        routeInstance: routeInstance || null,
+        pingResult: problematicPing,
+        graphData: zabbixData,
+        ...neighborData
+      });
+    } else {
+      return res.status(200).json({
+        message: "Customer is healthy",
+        interface: interfaceName,
+        switchName: activeIntf.switchName,
+        routeInstance: routeInstance || null,
+        pingResults,
+        graphData: zabbixData,
+        ...neighborData
+      });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+exports.iptDiagnosisController = async (req, res) => {
+  const { interfaceName } = req.body;
+
+  try {
+    const iptcusomter = db.iptcustomers;
+    const iptcustomerinfo = db.iptcustomerinfos;
+
+    const customerInfo = await iptcustomerinfo.findOne({
+      where: { interface: interfaceName },
+      include: [{ model: iptcusomter, attributes: ["operationalStatus", "switchName"] }],
+    });
+
+    if (!customerInfo) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    // 1. Parallel check across all IPT PEs
+    const iptSwitchesResults = await Promise.all(
+      iptSwitches.map(async (sw) => {
+        const cmd = `show interfaces descriptions | match ${interfaceName}`;
+        const output = await runCommand(sw.host, cmd);
+        return parseInterfaces(output, sw.name, sw.host);
+      })
+    );
+
+    const allInterfaces = iptSwitchesResults.flat();
+    const activeIntf = allInterfaces.find(i => i.operationalStatus === "up") || allInterfaces[0];
+
+    if (!activeIntf) return res.status(404).json({ message: "No interface data found" });
+
+
+    // --- CASE: DOWN ---
+    if (activeIntf.operationalStatus === "down") {
+      const neighborData = await getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]);
+      return res.status(200).json({
+        message: "Customer is down on both BNGs",
+        ...neighborData
+      });
+    }
+
+    // --- CASE: UP ---
+    // 2. Get ARP IPs
+    const arpCmd = `show arp no-resolve interface ${interfaceName}`;
+    const arpOutput = await runCommand(activeIntf.host, arpCmd);
+    const ipRegex = /(\d{1,3}(?:\.\d{1,3}){3})/g;
+    const customerIps = [...arpOutput.matchAll(ipRegex)].map(m => m[1]);
+
+    if (customerIps.length === 0) {
+      const [neighborData, zabbixData] = await Promise.all([
+        getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+        getZabbixHistory(interfaceName, activeIntf.switchName)
+      ]);
+      return res.status(200).json({
+        message: "Customer is up but no IPs found in ARP",
+        ...neighborData,
+        graphData: zabbixData
+      });
+    }
+
+    const customerIp = customerIps[0];
+
+    // 3. Get BGP summary to extract ASN
+    const bgpSummaryOutput = await runCommand(
+      activeIntf.host,
+      `show bgp summary | match ${customerIp}`
+    );
+
+    // Format: "41.175.44.62   327885   18292   2395901   0   42   5d Establ"
+    const bgpFields = bgpSummaryOutput.trim().split(/\s+/);
+    const customerAsn = bgpFields.length >= 2 ? bgpFields[1] : null;
+
+    // 4. Get routes received from this BGP peer using the ASN
+    let bgpRoutes = [];
+    if (customerAsn) {
+      const routeOutput = await runCommand(
+        activeIntf.host,
+        `show route receive-protocol bgp ${customerIp} | match ${customerAsn}`
+      );
+      // Parse prefixes: "* 169.255.184.0/22   41.175.44.62   0   327885 ?"
+      bgpRoutes = routeOutput
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .reduce((acc, line) => {
+          const prefixMatch = line.match(/(\d{1,3}(?:\.\d{1,3}){3}\/\d+)/);
+          if (prefixMatch) acc.push(prefixMatch[1]);
+          return acc;
+        }, []);
+    }
+
+    const [neighborData, zabbixData] = await Promise.all([
+        getNeighborDetails(activeIntf.host, interfaceName.split(".")[0]),
+        getZabbixHistory(interfaceName, activeIntf.switchName)
+      ]);
+
+    return res.status(200).json({
+      message: customerAsn ? "Customer BGP session established" : "Customer is up but BGP session not found",
+      interface: interfaceName,
+      switchName: activeIntf.switchName,
+      customerIp,
+      customerAsn: customerAsn || null,
+      bgpRouteCount: bgpRoutes.length,
+      bgpRoutes,
+      graphData: zabbixData,
+      ...neighborData
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+}
+
+exports.ftthDiagnosisController = async (req, res) => {
+  const { ip } = req.body;
+
+  if (!ip) return res.status(400).json({ message: "IP address is required" });
+
+  // Basic IP validation to prevent command injection
+  if (!/^[\da-f:.]+$/i.test(ip)) {
+    return res.status(400).json({ message: "Invalid IP address" });
+  }
+
+  try {
+    // Fetch customer record for expiry details
+    const FTTHCustomer = db.ftthcustomers;
+    const customer = await FTTHCustomer.findOne({
+      where: { ip },
+      attributes: ["customerID", "customerName", "pppoeusername", "topUpExpiry", "isExpired", "isFreeCustomer", "notInInfo"],
+    });
+
+    // Build expiry info block
+    let expiryInfo = null;
+    if (customer) {
+      const expiry = customer.topUpExpiry ? new Date(customer.topUpExpiry) : null;
+      if (!expiry) {
+        expiryInfo = { status: "unavailable", message: "No expiry date on record" };
+      } else {
+        const now = new Date();
+        const diffMs = expiry.getTime() - now.getTime();
+        const diffDays = Math.round(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
+        if (diffMs > 0) {
+          expiryInfo = {
+            status: "active",
+            topUpExpiry: expiry.toISOString().split("T")[0],
+            daysRemaining: diffDays,
+            message: `Service active — ${diffDays} day(s) remaining`,
+          };
+        } else {
+          expiryInfo = {
+            status: "expired",
+            topUpExpiry: expiry.toISOString().split("T")[0],
+            daysSinceExpiry: diffDays,
+            message: `Service expired ${diffDays} day(s) ago`,
+            isFreeCustomer: customer.isFreeCustomer || false,
+          };
+        }
+      }
+    }
+
+    const pingOutput = await new Promise((resolve, reject) => {
+      // -c 5: 5 packets, -W 2: 2s timeout per packet
+      exec(`ping -c 5 -W 2 ${ip}`, (error, stdout, stderr) => {
+        // ping exits with code 1 on 100% loss — not a real error
+        resolve(stdout + stderr);
+      });
+    });
+
+    const lossMatch = pingOutput.match(/(\d+)% packet loss/i);
+    const packetLoss = lossMatch ? parseFloat(lossMatch[1]) : 100;
+
+    const latMatch = pingOutput.match(
+      /rtt min\/avg\/max\/mdev = ([\d.]+)\/([\d.]+)\/([\d.]+)\/([\d.]+) ms/i
+    );
+
+    let status, message;
+    if (packetLoss === 100) {
+      status = "no_service";
+      message = "IP is not responding — customer may have no active service";
+    } else {
+      status = "active";
+      message = "Customer is up with active service";
+    }
+
+    return res.status(200).json({
+      ip,
+      status,
+      message,
+      packetLoss,
+      pingResult: {
+        packetLoss,
+        minLatency: latMatch ? parseFloat(latMatch[1]) : null,
+        avgLatency: latMatch ? parseFloat(latMatch[2]) : null,
+        maxLatency: latMatch ? parseFloat(latMatch[3]) : null,
+        stddevLatency: latMatch ? parseFloat(latMatch[4]) : null,
+      },
+      rawOutput: pingOutput,
+      customerInfo: customer
+        ? {
+            customerID: customer.customerID,
+            customerName: customer.customerName,
+            pppoeusername: customer.pppoeusername,
+            notInInfo: customer.notInInfo || false,
+          }
+        : null,
+      expiryInfo,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Diagnosis failed", error: error.message });
+  }
+};
+
 // Calculate uptime for a single customer based on Zabbix history
-// Rules:
 // - User provides a start date (YYYY-MM-DD), end date is "now"
 // - Range must not exceed 90 days from now
 // - For each sample, if traffic > 0 bps it is considered "up"; if 0 then "down"
@@ -334,6 +672,16 @@ async function getNeighborDetails(host, base) {
 
 
 async function getZabbixHistory(interfaceName, switchName, hours = 6) {
+
+  const getZabbixHostName = (switchName) => {
+    const hostMapping = {
+      "LTZ-PE1-RAH": "lo-0.ltz-pe1-rah.liquidtelecom.net",
+      "LTZ-P1-DAR": "lo-0.ltz-p1-dar.liquidtelecom.net",
+      // Add more mappings here as needed
+    };
+    return hostMapping[switchName] || switchName;
+  };
+
   try {
     const url = "https://monitoring.liquidtelecom.net/api_jsonrpc.php";
     const headers = { "Content-Type": "application/json", Authorization: undefined, };
@@ -342,7 +690,7 @@ async function getZabbixHistory(interfaceName, switchName, hours = 6) {
     const loginRes = await axios.post(url, {
       jsonrpc: "2.0",
       method: "user.login",
-      params: { username: "godwin.makyao@liquidtech.co.tz", password: "Namwel200148#@!" },
+      params: { username: process.env.ZABBIX_USERNAME, password: process.env.ZABBIX_PASSWORD },
       id: 1,
     }, { headers });
 
@@ -354,7 +702,7 @@ async function getZabbixHistory(interfaceName, switchName, hours = 6) {
       method: "host.get",
       params: {
         output: ["hostid"],
-        filter: { host: [switchName] },
+        filter: { host: [getZabbixHostName(switchName)] },
       },
       id: 1,
       auth: authToken,

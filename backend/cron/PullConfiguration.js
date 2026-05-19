@@ -2,11 +2,11 @@ const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op, literal } = require("sequelize");
 
-require("dotenv").config({ path: "../.env" });
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 const sshConfig = {
-  username: "godwin.makyao",
-  password: "Namwel200148#@!",
+  username: process.env.SSH_USERNAME,
+  password: process.env.SSH_PASSWORD,
   // OPTIMIZATION 1: Add timeouts for connection stability
   readyTimeout: 10000, 
   keepaliveInterval: 10000,

@@ -222,7 +222,27 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       getActualDownFromTable(db.diacustomers, "DIA"),
       getActualDownFromTable(db.iptcustomers, "IPT"),
       getActualDownFromTable(db.sharedcustomers, "SHARED"),
+      getActualDownFromTable(db.l3vpncustomers, "L3VPN"),
     ]);
+
+    // FTTH uses 'status' instead of 'operationalStatus' and 'ip' as identifier
+    if (!customerType || customerType === "FTTH") {
+      const ftthDownRaw = await db.ftthcustomers.findAll({
+        where: { status: "down" },
+        attributes: ["ip", "pppoeusername", "ip_version"],
+        raw: true,
+      });
+      for (const c of ftthDownRaw) {
+        const key = `FTTH:${c.ip}`;
+        actualDownInterfaces.set(key, {
+          interface: c.ip,
+          switchName: null,
+          customerType: "FTTH",
+          pppoeusername: c.pppoeusername,
+          ip_version: c.ip_version,
+        });
+      }
+    }
 
     console.log(`[Churn] Actual currently down interfaces: ${actualDownInterfaces.size}`);
 
@@ -326,12 +346,42 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       return untrackedDown;
     };
 
-    // Fetch untracked from all three tables
+    // Fetch untracked from all tables
     const diaDown = await fetchUntrackedFromTable(db.diacustomers, db.customerinfos, "DIA");
     const iptDown = await fetchUntrackedFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT");
     const sharedDown = await fetchUntrackedFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED");
+    const l3vpnDown = await fetchUntrackedFromTable(db.l3vpncustomers, db.l3vpncustomerinfos, "L3VPN");
 
-    results.push(...diaDown, ...iptDown, ...sharedDown);
+    // FTTH untracked (ip is the identifier, pppoeusername is the customer name)
+    const ftthDown = [];
+    if (!customerType || customerType === "FTTH") {
+      for (const [key, c] of actualDownInterfaces.entries()) {
+        if (c.customerType !== "FTTH") continue;
+        if (seenInterfaces.has(key)) continue;
+        ftthDown.push({
+          interface: c.interface,
+          ip: c.interface,
+          pppoeusername: c.pppoeusername || null,
+          ip_version: c.ip_version || null,
+          customerType: "FTTH",
+          switchName: null,
+          customerName: c.pppoeusername || null,
+          cid: null,
+          nbr: null,
+          previousStatus: "unknown",
+          newStatus: "down",
+          status: "down",
+          downSince: null,
+          downtimeSeconds: null,
+          downtimeFormatted: "Unknown (before tracking)",
+          churnRisk: "unknown",
+          source: "untracked",
+        });
+        seenInterfaces.add(key);
+      }
+    }
+
+    results.push(...diaDown, ...iptDown, ...sharedDown, ...l3vpnDown, ...ftthDown);
 
     // If customer_relation, filter to their watchlist only
     if (req.user?.role === "customer_relation") {

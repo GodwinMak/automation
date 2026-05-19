@@ -5,6 +5,8 @@ const CustomerInfo = db.customerinfos;
 const DiaCustomer = db.diacustomers;
 const IptCustomer = db.iptcustomers;
 const SharedCustomer = db.sharedcustomers;
+const L3VPNCustomer = db.l3vpncustomers;
+const FTTHCustomer = db.ftthcustomers;
 
 // get count of devices available, DIA customers, IPT customers, Shared customers, and upgrades
 exports.getStatusCounts = async (req, res) => {
@@ -34,6 +36,36 @@ exports.getStatusCounts = async (req, res) => {
     const downSharedCustomerCount = await SharedCustomer.count({
       where: { operationalStatus: "down" },
     });
+
+    // L3VPN Customer counts
+    const upL3VPNCustomerCount = await L3VPNCustomer.count({
+      where: { operationalStatus: "up" },
+    });
+    const downL3VPNCustomerCount = await L3VPNCustomer.count({
+      where: { operationalStatus: "down" },
+    });
+
+    // FTTH Customer counts
+    const upFTTHCustomerCount = await FTTHCustomer.count({
+      where: { status: "up" },
+    });
+    const downFTTHCustomerCount = await FTTHCustomer.count({
+      where: { status: "down" },
+    });
+
+    // FTTH Expired / Active (not expired) counts
+    const expiredUpFTTHCount = await FTTHCustomer.count({
+      where: { isExpired: true, status: "up" },
+    });
+    const expiredDownFTTHCount = await FTTHCustomer.count({
+      where: { isExpired: true, status: "down" },
+    });
+    const activeUpFTTHCount = await FTTHCustomer.count({
+      where: { isExpired: false, status: "up" },
+    });
+    const activeDownFTTHCount = await FTTHCustomer.count({
+      where: { isExpired: false, status: "down" },
+    });
     
     // Upgrade counts
     const temporaryUpgradesCount = await CustomerInfo.count({
@@ -54,6 +86,14 @@ exports.getStatusCounts = async (req, res) => {
       downIptCustomerCount,
       upSharedCustomerCount,
       downSharedCustomerCount,
+      upL3VPNCustomerCount,
+      downL3VPNCustomerCount,
+      upFTTHCustomerCount,
+      downFTTHCustomerCount,
+      expiredUpFTTHCount,
+      expiredDownFTTHCount,
+      activeUpFTTHCount,
+      activeDownFTTHCount,
       temporaryUpgradesCount,
       permanentUpgradesCount,
       noUpgradesCount,

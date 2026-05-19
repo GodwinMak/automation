@@ -3,12 +3,12 @@ const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op } = require("sequelize");
 
-require("dotenv").config({ path: "../.env" });
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 module.exports = (io) => {
   const sshConfig = {
-    username: "godwin.makyao",
-    password: "Namwel200148#@!",
+    username: process.env.SSH_USERNAME,
+    password: process.env.SSH_PASSWORD,
   };
 
   // === DATABASE MODELS ===

@@ -1,0 +1,484 @@
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
+import { ReusableTable } from "@/components/Table";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Eye, Upload, Loader2, Download } from "lucide-react";
+import { PRODUCTION_URL } from "@/utils/Api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { useNavigate, useLocation } from "react-router-dom";
+
+const FTTHCustomer = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { state: locationState } = location;
+
+  const [customers, setCustomers] = useState([]);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Upload state (PPPoE Excel — updates ftthcustomer)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  // Churn report upload state (Active-ChurnRetailReport — updates ftthcustomerinfo)
+  const churnFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingChurn, setUploadingChurn] = useState(false);
+  const [churnUploadResult, setChurnUploadResult] = useState<any>(null);
+  const [churnUploadError, setChurnUploadError] = useState<string | null>(null);
+  const [isChurnModalOpen, setIsChurnModalOpen] = useState(false);
+
+  const initialFilter =
+    locationState?.filterType === "up" || locationState?.filterType === "down"
+      ? locationState.filterType
+      : "all";
+  const [statusFilter, setStatusFilter] = useState(initialFilter);
+
+  const initialExpiry =
+    locationState?.expiryFilter === "expired" || locationState?.expiryFilter === "active"
+      ? locationState.expiryFilter
+      : "all";
+  const [expiryFilter, setExpiryFilter] = useState(initialExpiry);
+  const [withinDays, setWithinDays] = useState("");
+  const [ipVersionFilter, setIpVersionFilter] = useState("all");
+  const [exporting, setExporting] = useState(false);
+
+  const buildQuery = () => {
+    const base = `search=${search}&status=${statusFilter}&expiry=${expiryFilter}`;
+    const wd = withinDays ? `&withinDays=${withinDays}` : "";
+    const ipv = ipVersionFilter !== "all" ? `&ip_version=${ipVersionFilter}` : "";
+    return base + wd + ipv;
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await axios.get(
+        `${PRODUCTION_URL}/ftthcustomers/export?${buildQuery()}`,
+        { responseType: "arraybuffer", withCredentials: true }
+      );
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `FTTH_Subscribers_${new Date().toISOString().split("T")[0]}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      setLoading(true);
+      try {
+        const res = await axios.get(
+          `${PRODUCTION_URL}/ftthcustomers?page=${page}&pageSize=${pageSize}&${buildQuery()}`
+        );
+        setCustomers(res.data.customers || []);
+        setTotalPages(res.data.totalPages);
+      } catch (err) {
+        console.error("Error fetching FTTH customers:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCustomers();
+  }, [page, search, pageSize, statusFilter, expiryFilter, withinDays, ipVersionFilter]);
+
+  const handlePageSizeChange = (value: number) => {
+    setPageSize(value);
+    setPage(1);
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // reset input so same file can be re-selected
+    e.target.value = "";
+
+    setUploading(true);
+    setUploadResult(null);
+    setUploadError(null);
+    setIsUploadModalOpen(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await axios.post(
+        `${PRODUCTION_URL}/ftthcustomers/upload`,
+        formData,
+        { withCredentials: true, headers: { "Content-Type": "multipart/form-data" } }
+      );
+      setUploadResult(res.data);
+      // Refresh table
+      setPage(1);
+    } catch (err: any) {
+      setUploadError(err?.response?.data?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleChurnUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setUploadingChurn(true);
+    setChurnUploadResult(null);
+    setChurnUploadError(null);
+    setIsChurnModalOpen(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await axios.post(
+        `${PRODUCTION_URL}/ftthcustomers/upload-churn`,
+        formData,
+        { withCredentials: true, headers: { "Content-Type": "multipart/form-data" } }
+      );
+      setChurnUploadResult(res.data);
+      setPage(1);
+    } catch (err: any) {
+      setChurnUploadError(err?.response?.data?.message || "Churn upload failed");
+    } finally {
+      setUploadingChurn(false);
+    }
+  };
+
+  const expiryRenderer = (customer: any) => {
+    const expiry = customer.topUpExpiry;
+    if (!expiry) return <span className="text-muted-foreground text-xs italic">Not available</span>;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const expiryDate = new Date(expiry); expiryDate.setHours(0, 0, 0, 0);
+    const diffMs = expiryDate.getTime() - today.getTime();
+    const diffDays = Math.round(Math.abs(diffMs) / (1000 * 60 * 60 * 24));
+    if (diffMs === 0) {
+      return (
+        <span className="text-yellow-500 font-medium text-xs">
+          Expires today
+        </span>
+      );
+    }
+    if (diffMs > 0) {
+      return (
+        <span className="text-green-600 dark:text-green-400 font-medium text-xs">
+          {diffDays}d remaining
+        </span>
+      );
+    }
+    return (
+      <span className="text-red-500 font-medium text-xs">
+        Expired {diffDays}d ago
+      </span>
+    );
+  };
+
+  const columns = [
+    { key: "customerID", label: "Customer ID" },
+    { key: "customerName", label: "Customer Name" },
+    { key: "pppoeusername", label: "PPPoE Username" },
+    { key: "ip", label: "IP Address" },
+    { key: "ip_version", label: "IP Version" },
+    { key: "status", label: "Status" },
+    { key: "topUpExpiry", label: "Expiry", render: expiryRenderer },
+  ];
+
+  const Action = (customer: any) => (
+    <>
+      <DropdownMenuItem
+        className="gap-2"
+        onClick={() => navigate("/view-ftth-customer", { state: { customer } })}
+      >
+        <Eye className="h-4 w-4" />
+        View Customer
+      </DropdownMenuItem>
+    </>
+  );
+
+  const filteredCustomers = customers;
+
+  return (
+    <div className="p-6">
+      {/* Hidden file input — PPPoE Excel */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={handleUpload}
+      />
+      {/* Hidden file input — Active-ChurnRetailReport */}
+      <input
+        ref={churnFileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={handleChurnUpload}
+      />
+
+      <ReusableTable
+        title="FTTH Subscribers"
+        description="Manage FTTH PPPoE subscribers"
+        columns={columns}
+        data={filteredCustomers}
+        actions={Action}
+        loading={loading}
+        filters={
+          <>
+            <label className="mr-2 font-medium">Status:</label>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Filter Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="up">Up</SelectItem>
+                <SelectItem value="down">Down</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="mr-2 font-medium">Expiry:</label>
+            <Select
+              value={expiryFilter}
+              onValueChange={(value) => {
+                setExpiryFilter(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Filter Expiry" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="active">Not Expired</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+                <SelectItem value="unavailable">Not Available</SelectItem>
+              </SelectContent>
+            </Select>
+            <label className="mr-2 font-medium">IP Version:</label>
+            <Select
+              value={ipVersionFilter}
+              onValueChange={(value) => {
+                setIpVersionFilter(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="IP Version" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="IPv4">IPv4</SelectItem>
+                <SelectItem value="IPv6">IPv6</SelectItem>
+              </SelectContent>
+            </Select>
+            <input
+              type="number"
+              min="1"
+              disabled={expiryFilter === "unavailable"}
+              placeholder={
+                expiryFilter === "expired"
+                  ? "Expired last N days"
+                  : expiryFilter === "active"
+                  ? "Expiring in N days"
+                  : expiryFilter === "unavailable"
+                  ? "N/A"
+                  : "±N days from now"
+              }
+              value={withinDays}
+              onChange={(e) => {
+                setWithinDays(e.target.value);
+                setPage(1);
+              }}
+              className="border rounded-lg px-2 py-1.5 text-sm w-32 focus:ring-2 focus:ring-blue-500 text-black disabled:opacity-40 disabled:cursor-not-allowed"
+            />
+          </>
+        }
+        headerActions={
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search username or IP..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 text-black"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              {uploading ? "Uploading..." : "Upload PPPoE Excel"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              disabled={uploadingChurn}
+              onClick={() => churnFileInputRef.current?.click()}
+            >
+              {uploadingChurn ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              {uploadingChurn ? "Uploading..." : "Upload Churn Report"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              disabled={exporting}
+              onClick={handleExport}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {exporting ? "Exporting..." : "Export Excel"}
+            </Button>
+          </div>
+        }
+        pagination={{
+          page,
+          totalPages,
+          onPageChange: (newPage: number) => setPage(newPage),
+          pageSize,
+          onPageSizeChange: handlePageSizeChange,
+        }}
+      />
+
+      {/* Upload Result Modal */}
+      <Dialog open={isUploadModalOpen} onOpenChange={setIsUploadModalOpen}>
+        <DialogContent className="max-w-md dark:text-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Upload Result
+            </DialogTitle>
+          </DialogHeader>
+
+          {uploading ? (
+            <div className="flex flex-col items-center justify-center py-8 gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground text-sm">Processing Excel file...</p>
+            </div>
+          ) : uploadError ? (
+            <div className="text-red-500 py-4 text-sm font-medium">{uploadError}</div>
+          ) : uploadResult ? (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Excel Unique Users", value: uploadResult.excelRows },
+                  { label: "DB Records Missing Data", value: uploadResult.dbRecordsMissingData },
+                  { label: "Matched in Excel", value: uploadResult.matched },
+                  { label: "Updated", value: uploadResult.updated },
+                  { label: "Not in Excel", value: uploadResult.notInExcel },
+                  { label: "Already filled (skipped)", value: uploadResult.skipped },
+                  { label: "Duplicate ID (skipped)", value: uploadResult.duplicateSkipped ?? 0 },
+                ].map(({ label, value }) => (
+                  <div key={label} className="p-3 rounded-xl bg-muted/50 border border-border">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-bold text-foreground">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button onClick={() => setIsUploadModalOpen(false)} type="button">Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Churn Report Upload Modal */}
+      <Dialog open={isChurnModalOpen} onOpenChange={setIsChurnModalOpen}>
+        <DialogContent className="max-w-md dark:text-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Churn Report Upload Result
+            </DialogTitle>
+          </DialogHeader>
+
+          {uploadingChurn ? (
+            <div className="flex flex-col items-center justify-center py-8 gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground text-sm">Processing churn report...</p>
+            </div>
+          ) : churnUploadError ? (
+            <div className="text-red-500 py-4 text-sm font-medium">{churnUploadError}</div>
+          ) : churnUploadResult ? (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Rows Parsed", value: churnUploadResult.stats?.parsed },
+                  { label: "Upserted to Info", value: churnUploadResult.stats?.upserted },
+                  { label: "Expired", value: churnUploadResult.stats?.expired },
+                  { label: "Not in Network", value: churnUploadResult.stats?.skippedNoCustomer },
+                  { label: "Not in Churn Report", value: churnUploadResult.stats?.notInInfo },
+                ].map(({ label, value }) => (
+                  <div key={label} className="p-3 rounded-xl bg-muted/50 border border-border">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-bold text-foreground">{value ?? "—"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button onClick={() => setIsChurnModalOpen(false)} type="button">Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default FTTHCustomer;

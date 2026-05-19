@@ -35,6 +35,11 @@ db.iptcustomers = require("./iptCustomer.js")(sequelize, DataTypes);
 db.iptcustomerinfos = require("./iptcustomerinfo.js")(sequelize, DataTypes);
 db.sharedcustomers = require("./sharedCustomer.js")(sequelize, DataTypes);
 db.sharedcustomerinfos = require("./sharedCustomerinfo.js")(sequelize, DataTypes);
+db.l3vpncustomers = require("./L3VPNCustomer.js")(sequelize, DataTypes);
+db.l3vpncustomerinfos = require("./L3VPNCustomerinfo.js")(sequelize, DataTypes);
+db.ftthcustomers = require("./FTTHCustomer.js")(sequelize, DataTypes);
+db.ftthcustomerinfos = require("./ftthcustomerinfo.js")(sequelize, DataTypes);
+db.ftthReports = require("./ftthReport.js")(sequelize, DataTypes);
 db.users = require("./user.js")(sequelize, DataTypes);
 db.configurationdata = require("./configurationdata.js")(sequelize, DataTypes);
 db.upgradeinfos = require("./upgradeinfo.js")(sequelize, DataTypes);
@@ -49,6 +54,7 @@ db.pitchForUpgradeReports = require("./pitchForUpgradeReport.js")(sequelize, Dat
 db.switchConfiguration = require("./switchConfiguration.js")(sequelize, DataTypes);
 db.isisAdjacency = require("./isisAdjacent.js")(sequelize, DataTypes);
 db.push_tokens = require("./pushToken.js")(sequelize, DataTypes);
+
 
 
 
@@ -85,6 +91,30 @@ db.sharedcustomerinfos.belongsTo(db.sharedcustomers, {
   targetKey: "interface",
   onDelete: "CASCADE",
 });
+
+// L3VPN Customer Relations
+db.l3vpncustomers.hasMany(db.l3vpncustomerinfos, {
+  foreignKey: "interface",
+  sourceKey: "interface",
+  onDelete: "CASCADE",
+});
+db.l3vpncustomerinfos.belongsTo(db.l3vpncustomers, {
+  foreignKey: "interface",
+  targetKey: "interface",
+  onDelete: "CASCADE",
+});
+
+// FTTH Customer Relations (join on customerID)
+db.ftthcustomers.hasOne(db.ftthcustomerinfos, {
+  foreignKey: "customerID",
+  sourceKey: "customerID",
+  onDelete: "CASCADE",
+});
+db.ftthcustomerinfos.belongsTo(db.ftthcustomers, {
+  foreignKey: "customerID",
+  targetKey: "customerID",
+});
+
 // DIA Customers <-> Client DB
 db.customerinfos.hasOne(db.client_dbs,{
   foreignKey: "network_cid",
@@ -114,6 +144,16 @@ db.sharedcustomerinfos.hasOne(db.client_dbs, {
 });
 
 db.client_dbs.belongsTo(db.sharedcustomerinfos, {
+  foreignKey: "network_cid",
+  targetKey: "cid",
+});
+
+db.l3vpncustomerinfos.hasOne(db.client_dbs, {
+  foreignKey: "network_cid",
+  sourceKey: "cid",
+});
+
+db.client_dbs.belongsTo(db.l3vpncustomerinfos, {
   foreignKey: "network_cid",
   targetKey: "cid",
 });

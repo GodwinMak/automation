@@ -12,9 +12,9 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
-      // Customer type: DIA, IPT, SHARED
+      // Customer type: DIA, IPT, SHARED, L3VPN, FTTH
       customerType: {
-        type: DataTypes.ENUM("DIA", "IPT", "SHARED"),
+        type: DataTypes.ENUM("DIA", "IPT", "SHARED", "L3VPN", "FTTH"),
         allowNull: false,
       },
       // Interface identifier

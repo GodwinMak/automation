@@ -8,12 +8,12 @@ const {
   getDiaCustomerInfoMap,
 } = require("../utils/statusTracker");
 
-require("dotenv").config({ path: "../.env" });
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 module.exports = (io) => {
   const sshConfig = {
-    username: "godwin.makyao",
-    password: "Namweltyner123!@#",
+    username: process.env.SSH_USERNAME,
+    password: process.env.SSH_PASSWORD,
   };
 
   // === DATABASE MODELS ===

@@ -425,7 +425,6 @@ const ViewDiaCutomer = () => {
         auth,
       });
 
-      console.log(host)
       const hostid =
         Array.isArray(host) && host.length > 0 ? host[0].hostid : undefined;
       if (!hostid) throw new Error("Host ID not found");

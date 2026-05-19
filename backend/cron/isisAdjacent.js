@@ -6,12 +6,10 @@ const { Op } = require("sequelize");
 const { sendSms } = require("../utils/sms");
 const sendPushNotification = require("../utils/sendPushNotification");
 
-
 const Devices = db.devices;
 const IsisAdjacency = db.isisAdjacency;
 
-
-require("dotenv").config({ path: "../.env" });
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 // Helper: Format date in EAT (UTC+3)
 const toEATString = (date) => {
@@ -21,9 +19,9 @@ const toEATString = (date) => {
 
 module.exports = (io) => {
   const sshConfig = {
-    username: "godwin.makyao",
-    password: "Namweltyner123!@#",
-    readyTimeout: 10000,
+    username: process.env.SSH_USERNAME,
+    password: process.env.SSH_PASSWORD,
+    readyTimeout: 30000,
   };
 
   const runCommandsInSession = (host, commands) =>
@@ -104,7 +102,6 @@ module.exports = (io) => {
     return stats;
   };
 
-
   // Helper: compute utilisation % from bps and port speed (in Mbps)
   const computeUtilization = (inputBpsStr, outputBpsStr, portSpeedMbps) => {
     if (!portSpeedMbps) return null;
@@ -143,7 +140,7 @@ module.exports = (io) => {
           prevMap.set(key, rec);
         });
 
-        // --- 2. SSH data collection (same as before) ---
+        // --- 2. SSH data collection ---
         const [adjRaw, isisIntfRaw] = await runCommandsInSession(device.ip, [
           "show isis adjacency",
           "show isis interface"
@@ -166,14 +163,23 @@ module.exports = (io) => {
             iface, parseInterfaceDetails(statResults[i])
         ]));
 
-        // --- 3. Mark all records for this device as Down (temporary) ---
-        await IsisAdjacency.update(
-          { state: "Down", last_checked: timestamp },
-          { where: { local_device_id: device.id } }
-        );
+        // --- 3. Build set of currently UP adjacencies (from SSH) ---
+        const currentUpKeys = new Set();
+        for (const adj of adjacencies) {
+          const key = `${adj.interface}|${adj.neighbor_name}|${adj.level}`;
+          currentUpKeys.add(key);
+        }
 
-        // --- 4. Upsert current Up adjacencies ---
-        const upsertedKeys = new Set();
+        // --- 4. Detect failures BEFORE any DB updates ---
+        const failures = [];
+        for (const [key, prevRec] of prevMap.entries()) {
+          if (prevRec.state === "Up" && !currentUpKeys.has(key)) {
+            // Was Up in DB, not in current SSH output -> failure
+            failures.push(prevRec);
+          }
+        }
+
+        // --- 5. Upsert current UP adjacencies ---
         for (const adj of adjacencies) {
           const metricEntry = metricMap[adj.raw_interface] || metricMap[adj.interface];
           const metric = metricEntry ? (adj.level === 2 ? metricEntry.l2 : metricEntry.l1) : null;
@@ -193,31 +199,37 @@ module.exports = (io) => {
             input_bps: ifaceStats.input_bps || null,
             output_bps: ifaceStats.output_bps || null,
           });
-          upsertedKeys.add(`${adj.interface}|${adj.neighbor_name}|${adj.level}`);
         }
 
-        // --- 5. Detect failures and recoveries ---
-        const failures = [];
-        const recoveries = [];
+        // --- 6. Mark missing links as Down ---
+        // Only mark as Down the links that were Up but are now missing from SSH
+        for (const failure of failures) {
+          await IsisAdjacency.update(
+            { state: "Down", last_checked: timestamp },
+            { 
+              where: { 
+                id: failure.id
+              } 
+            }
+          );
+        }
 
+        // --- 7. Detect recoveries (only for links that were previously marked Down) ---
+        const recoveries = [];
         for (const [key, prevRec] of prevMap.entries()) {
-          if (prevRec.state === "Up" && !upsertedKeys.has(key)) {
-            // Was Up, now Down -> failure
-            failures.push(prevRec);
-          } else if (prevRec.state === "Down" && upsertedKeys.has(key)) {
-            // Was Down, now Up -> recovery
+          if (prevRec.state === "Down" && currentUpKeys.has(key)) {
+            // Was Down in DB, now appears in SSH -> recovery
             recoveries.push({ previous: prevRec, newUp: true });
           }
         }
 
-        // --- 6. Send alerts for failures (if not recently sent) ---
-
+        // --- 8. Send alerts for failures ---
         for (const failure of failures) {
           const lastAlert = failure.last_down_alert_sent;
           const now = new Date();
           // Cooldown: send only once per down event (if last alert > 2 hours or null)
           if (!lastAlert || (now - new Date(lastAlert)) > 2 * 60 * 60 * 1000) {
-            const message = `LINK DOWN: ${device.name} x ${failure.neighbor_name} | ${failure.interface} | State: Down since ${toEATString(new Date(failure.last_checked))}`;
+            const message = `LINK DOWN: ${device.name} x ${failure.neighbor_name} | ${failure.interface} | State: Down since ${toEATString(timestamp)}`;
             await sendSms(message);
             // Push notification to all users
             const tokens = await sendPushNotification.getAllTokens();
@@ -231,7 +243,7 @@ module.exports = (io) => {
           }
         }
 
-        // --- 7. Send alerts for recoveries (with duration) ---
+        // --- 9. Send alerts for recoveries (with duration) ---
         for (const rec of recoveries) {
           const prev = rec.previous;
           const lastAlert = prev.last_up_alert_sent;
@@ -249,7 +261,7 @@ module.exports = (io) => {
           }
         }
 
-        // --- 8. High Traffic alerts (for Up links, utilisation >80%, cooldown 2h) ---
+        // --- 10. High Traffic alerts (for Up links, utilisation >80%, cooldown 2h) ---
         const now = new Date();
         const highTrafficLinks = await IsisAdjacency.findAll({
           where: {

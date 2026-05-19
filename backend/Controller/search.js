@@ -7,6 +7,9 @@ const IptCustomerInfo = db.iptcustomerinfos;
 const IptCustomer = db.iptcustomers;
 const SharedCustomerInfo = db.sharedcustomerinfos;
 const SharedCustomer = db.sharedcustomers;
+const L3VPNCustomerInfo = db.l3vpncustomerinfos;
+const L3VPNCustomer = db.l3vpncustomers;
+const FTTHCustomer = db.ftthcustomers;
 
 exports.globalSearch = async (req, res) => {
   const query = req.query.q || "";
@@ -101,6 +104,45 @@ exports.globalSearch = async (req, res) => {
       limit: limit,
     });
 
+    // Search L3VPN Customers
+    const l3vpnResults = await L3VPNCustomerInfo.findAll({
+      where: {
+        [Op.or]: [
+          { customerName: { [Op.like]: searchPattern } },
+          { cid: { [Op.like]: searchPattern } },
+          { interface: { [Op.like]: searchPattern } },
+          { nbr: { [Op.like]: searchPattern } },
+          db.Sequelize.where(db.Sequelize.col('client_db.email_address'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.phone_number'), { [Op.like]: searchPattern }),
+          db.Sequelize.where(db.Sequelize.col('client_db.customer_name_pastel'), { [Op.like]: searchPattern }),
+        ],
+      },
+      include: [
+        {
+          model: L3VPNCustomer,
+          attributes: ["operationalStatus", "switchName"],
+        },
+        {
+          model: db.client_dbs,
+          required: false,
+        },
+      ],
+      limit: limit,
+    });
+
+    // Search FTTH Customers by pppoeusername, ip, customerID, or customerName
+    const ftthResults = await FTTHCustomer.findAll({
+      where: {
+        [Op.or]: [
+          { pppoeusername: { [Op.like]: searchPattern } },
+          { ip: { [Op.like]: searchPattern } },
+          { customerID: { [Op.like]: searchPattern } },
+          { customerName: { [Op.like]: searchPattern } },
+        ],
+      },
+      limit: limit,
+    });
+
     // Format results with type identifier
     const formattedResults = [
       ...diaResults.map((item) => ({
@@ -137,6 +179,30 @@ exports.globalSearch = async (req, res) => {
         switchName: item.sharedcustomer?.switchName || "",
         type: "Shared",
         route: "/view-shared-customer",
+        data: item,
+      })),
+      ...l3vpnResults.map((item) => ({
+        id: item.id,
+        customerName: item.customerName,
+        cid: item.cid,
+        interface: item.interface,
+        nbr: item.nbr,
+        status: item.l3vpncustomer?.operationalStatus || "unknown",
+        switchName: item.l3vpncustomer?.switchName || "",
+        type: "L3VPN",
+        route: "/view-l3vpn-customer",
+        data: item,
+      })),
+      ...ftthResults.map((item) => ({
+        id: item.id,
+        customerName: item.customerName || item.pppoeusername,
+        cid: item.customerID || item.ip,
+        interface: item.ip_version,
+        nbr: item.pppoeusername,
+        status: item.status || "unknown",
+        switchName: "",
+        type: "FTTH",
+        route: "/view-ftth-customer",
         data: item,
       })),
     ];

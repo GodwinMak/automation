@@ -37,6 +37,11 @@ import PitchForUpgrade from "./pages/PitchForUpgrade";
 import SwitchConfigurations from "./pages/SwitchConfigurations";
 import SwitchMap from "./pages/SwitchMap";
 import IsisImpactAnalyzer from "./pages/IsisImpactAnalyzer";
+import L3VPNCustomer from "./pages/L3VPNCustomer";
+import ViewL3VPNCustomer from "./pages/ViewL3VPNCustomer";
+import ViewFTTHCustomer from "./pages/ViewFTTHCustomer";
+import FTTHCustomer from "./pages/FTTHCustomer";
+import FTTHReports from "./pages/FTTHReports";
 
 const queryClient = new QueryClient();
 
@@ -112,6 +117,46 @@ const App = () => {
                     element={
                       <ProtectedRoute>
                         <SharedCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/l3vpn-customer"
+                    element={
+                      <ProtectedRoute>
+                        <L3VPNCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/view-l3vpn-customer"
+                    element={
+                      <ProtectedRoute>
+                        <ViewL3VPNCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/view-ftth-customer"
+                    element={
+                      <ProtectedRoute>
+                        <ViewFTTHCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/ftth-customer"
+                    element={
+                      <ProtectedRoute>
+                        <FTTHCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/ftth-reports"
+                    element={
+                      <ProtectedRoute>
+                        <FTTHReports />
                       </ProtectedRoute>
                     }
                   />

@@ -145,6 +145,8 @@ const COLORS = {
   DIA: "#3b82f6",
   IPT: "#8b5cf6",
   SHARED: "#06b6d4",
+  L3VPN: "#10b981",
+  FTTH: "#14b8a6",
   down: "#ef4444",
   up: "#22c55e",
   warning: "#f59e0b",
@@ -175,15 +177,18 @@ export default function ChurnAnalysis() {
   // Pagination states
   const [atRiskPage, setAtRiskPage] = useState(1);
   const [downtimePage, setDowntimePage] = useState(1);
+  const [ftthDowntimePage, setFtthDowntimePage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
 
-  // Risk filter for Extended Downtime
+  // Risk filters
   const [riskFilter, setRiskFilter] = useState<string | null>(getInitialRisk());
+  const [ftthRiskFilter, setFtthRiskFilter] = useState<string | null>(null);
 
   // Data states
   const [summary, setSummary] = useState<ChurnSummary | null>(null);
   const [unstableCustomers, setUnstableCustomers] = useState<UnstableCustomer[]>([]);
   const [extendedDowntime, setExtendedDowntime] = useState<ExtendedDowntime[]>([]);
+  const [ftthDowntime, setFtthDowntime] = useState<ExtendedDowntime[]>([]);
   const [recentChanges, setRecentChanges] = useState<StatusChange[]>([]);
   const [patterns, setPatterns] = useState<any>(null);
 
@@ -196,14 +201,17 @@ export default function ChurnAnalysis() {
       const [summaryRes, unstableRes, downtimeRes, changesRes, patternsRes] = await Promise.all([
         axios.get(`${PRODUCTION_URL}/churn-analysis/summary?days=${timeRange}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/unstable?days=${timeRange}&minChanges=3${typeParam}`),
-        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime?${typeParam.replace("&", "")}`),
+        // Always fetch all types for downtime — split FTTH on the frontend
+        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/changes?pageSize=50${typeParam}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/patterns?days=${timeRange}${typeParam}`),
       ]);
 
+      const allDowntime: ExtendedDowntime[] = downtimeRes.data.data || [];
       setSummary(summaryRes.data);
       setUnstableCustomers(unstableRes.data.data || []);
-      setExtendedDowntime(downtimeRes.data.data || []);
+      setExtendedDowntime(allDowntime.filter((c) => c.customerType !== "FTTH"));
+      setFtthDowntime(allDowntime.filter((c) => c.customerType === "FTTH"));
       setRecentChanges(changesRes.data.data || []);
       setPatterns(patternsRes.data);
     } catch (error) {
@@ -246,6 +254,8 @@ export default function ChurnAnalysis() {
       DIA: "/viewcustomer",
       IPT: "/view-ipt-customer",
       SHARED: "/view-shared-customer",
+      L3VPN: "/view-l3vpn-customer",
+      FTTH: "/view-ftth-customer",
     };
     navigate(routes[customer.customerType] || "/viewcustomer", {
       state: { customer: { interface: customer.interface, ...customer } },
@@ -257,15 +267,19 @@ export default function ChurnAnalysis() {
   useEffect(() => {
     setAtRiskPage(1);
     setDowntimePage(1);
+    setFtthDowntimePage(1);
     setHistoryPage(1);
     // Only reset riskFilter if not set from storage
     if (!localStorage.getItem("churn_riskFilter")) setRiskFilter(null);
   }, [timeRange, customerTypeFilter, searchQuery]);
 
-  // Reset downtime page when risk filter changes
+  // Reset downtime pages when risk filters change
   useEffect(() => {
     setDowntimePage(1);
   }, [riskFilter]);
+  useEffect(() => {
+    setFtthDowntimePage(1);
+  }, [ftthRiskFilter]);
 
   // Filter unstable customers by search
   const filteredUnstable = useMemo(() => {
@@ -288,9 +302,13 @@ export default function ChurnAnalysis() {
 
   const totalAtRiskPages = Math.ceil(filteredUnstable.length / PAGE_SIZE);
 
-  // Filter Extended Downtime by search + risk level
+  // Filter Extended Downtime (non-FTTH) by search + risk level + type filter
   const filteredDowntime = useMemo(() => {
     let base = extendedDowntime;
+
+    if (customerTypeFilter !== "all" && customerTypeFilter !== "FTTH") {
+      base = base.filter((c) => c.customerType === customerTypeFilter);
+    }
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -305,7 +323,24 @@ export default function ChurnAnalysis() {
 
     if (!riskFilter) return base;
     return base.filter((c) => c.churnRisk === riskFilter);
-  }, [extendedDowntime, riskFilter, searchQuery]);
+  }, [extendedDowntime, riskFilter, searchQuery, customerTypeFilter]);
+
+  // Filter FTTH Extended Downtime by search + risk level
+  const filteredFtthDowntime = useMemo(() => {
+    let base = ftthDowntime;
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      base = base.filter(
+        (c) =>
+          c.customerName?.toLowerCase().includes(query) ||
+          c.interface?.toLowerCase().includes(query)
+      );
+    }
+
+    if (!ftthRiskFilter) return base;
+    return base.filter((c) => c.churnRisk === ftthRiskFilter);
+  }, [ftthDowntime, ftthRiskFilter, searchQuery]);
 
   // Export Extended Downtime (filtered) to CSV/Excel
   const handleExportExtendedDowntime = () => {
@@ -372,23 +407,31 @@ export default function ChurnAnalysis() {
 
   const totalDowntimePages = Math.ceil(filteredDowntime.length / PAGE_SIZE);
 
-  // Count customers by risk level for badge counts
+  // Paginated data for FTTH Extended Downtime table
+  const paginatedFtthDowntime = useMemo(() => {
+    const start = (ftthDowntimePage - 1) * PAGE_SIZE;
+    return filteredFtthDowntime.slice(start, start + PAGE_SIZE);
+  }, [filteredFtthDowntime, ftthDowntimePage]);
+
+  const totalFtthDowntimePages = Math.ceil(filteredFtthDowntime.length / PAGE_SIZE);
+
+  // Count customers by risk level for badge counts (non-FTTH)
   const riskCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      low: 0,
-      medium: 0,
-      high: 0,
-      critical: 0,
-      churned: 0,
-      unknown: 0,
-    };
-    extendedDowntime.forEach(c => {
-      if (c.churnRisk && counts[c.churnRisk] !== undefined) {
-        counts[c.churnRisk]++;
-      }
+    const counts: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0, churned: 0, unknown: 0 };
+    filteredDowntime.forEach(c => {
+      if (c.churnRisk && counts[c.churnRisk] !== undefined) counts[c.churnRisk]++;
     });
     return counts;
-  }, [extendedDowntime]);
+  }, [filteredDowntime]);
+
+  // Count customers by risk level for badge counts (FTTH)
+  const ftthRiskCounts = useMemo(() => {
+    const counts: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0, churned: 0, unknown: 0 };
+    filteredFtthDowntime.forEach(c => {
+      if (c.churnRisk && counts[c.churnRisk] !== undefined) counts[c.churnRisk]++;
+    });
+    return counts;
+  }, [filteredFtthDowntime]);
 
   // Filter History table by search
   const filteredHistory = useMemo(() => {
@@ -575,6 +618,8 @@ export default function ChurnAnalysis() {
               <SelectItem value="DIA">DIA</SelectItem>
               <SelectItem value="IPT">IPT</SelectItem>
               <SelectItem value="SHARED">Shared</SelectItem>
+              <SelectItem value="L3VPN">L3VPN</SelectItem>
+              <SelectItem value="FTTH">FTTH</SelectItem>
             </SelectContent>
           </Select>
 
@@ -616,10 +661,11 @@ export default function ChurnAnalysis() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
+        <TabsList className="grid w-full grid-cols-5 lg:w-[650px]">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="unstable">At Risk</TabsTrigger>
           <TabsTrigger value="downtime">Extended Down</TabsTrigger>
+          <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -1007,6 +1053,125 @@ export default function ChurnAnalysis() {
                   totalPages={totalDowntimePages}
                   totalItems={filteredDowntime.length}
                   onPageChange={setDowntimePage}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* FTTH Extended Downtime Tab */}
+        <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
+          <Card className="border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Clock className="h-5 w-5 text-teal-400" />
+                FTTH Extended Downtime
+              </CardTitle>
+              <CardDescription className="space-y-3">
+                <p>FTTH subscribers currently down. Click a badge to filter by risk level:</p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {(["low", "medium", "high", "critical", "churned"] as const).map((level) => (
+                    <Badge
+                      key={level}
+                      className={`cursor-pointer transition-all ${RISK_COLORS[level]} ${
+                        ftthRiskFilter === level
+                          ? "ring-2 ring-offset-2 ring-offset-background ring-current"
+                          : "opacity-70 hover:opacity-100"
+                      }`}
+                      onClick={() => setFtthRiskFilter(ftthRiskFilter === level ? null : level)}
+                    >
+                      {level === "low" && "LOW (<1h)"}
+                      {level === "medium" && "MEDIUM (<1d)"}
+                      {level === "high" && "HIGH (<3d)"}
+                      {level === "critical" && "CRITICAL (<2w)"}
+                      {level === "churned" && "CHURNED (>2w)"}
+                      {" • "}{ftthRiskCounts[level]}
+                    </Badge>
+                  ))}
+                  {ftthRiskFilter && (
+                    <Button variant="ghost" size="sm" className="h-5 px-2 text-xs" onClick={() => setFtthRiskFilter(null)}>
+                      Clear filter ✕
+                    </Button>
+                  )}
+                </div>
+                {ftthRiskFilter && (
+                  <p className="text-sm font-medium">
+                    Showing {filteredFtthDowntime.length} FTTH customers with {ftthRiskFilter.toUpperCase()} risk
+                  </p>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border border-border/50">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>PPPoE Username</TableHead>
+                      <TableHead>IP Address</TableHead>
+                      <TableHead>Down Since</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Churn Risk</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ftthDowntime.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          No FTTH customers with extended downtime found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedFtthDowntime.map((customer, i) => (
+                        <TableRow
+                          key={i}
+                          className={`cursor-pointer hover:bg-muted/50 ${
+                            customer.source === "untracked" ? "bg-orange-500/5" : ""
+                          }`}
+                          onClick={() => handleViewCustomer(customer)}
+                        >
+                          <TableCell>
+                            <div>
+                              <p className="font-medium font-mono text-sm">{customer.customerName || "Unknown"}</p>
+                              {customer.source === "untracked" && (
+                                <Badge variant="outline" className="mt-1 text-[10px] bg-orange-500/10 text-orange-400 border-orange-500/30">
+                                  Before tracking
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm text-teal-400">{customer.interface || "-"}</TableCell>
+                          <TableCell className="text-sm">
+                            {customer.downSince
+                              ? new Date(customer.downSince).toLocaleString()
+                              : <span className="text-orange-400 italic">Unknown</span>
+                            }
+                          </TableCell>
+                          <TableCell>
+                            <span className={`font-mono font-bold ${
+                              customer.source === "untracked" ? "text-orange-400" : "text-red-400"
+                            }`}>
+                              {customer.downtimeFormatted}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {customer.churnRisk === "unknown" ? (
+                              <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">UNKNOWN</Badge>
+                            ) : (
+                              <Badge className={RISK_COLORS[customer.churnRisk as keyof typeof RISK_COLORS]}>
+                                {customer.churnRisk.toUpperCase()}
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                <PaginationControls
+                  currentPage={ftthDowntimePage}
+                  totalPages={totalFtthDowntimePages}
+                  totalItems={filteredFtthDowntime.length}
+                  onPageChange={setFtthDowntimePage}
                 />
               </div>
             </CardContent>

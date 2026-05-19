@@ -3,11 +3,12 @@ const { Client } = require("ssh2");
 const fs = require("fs");
 const path = require("path");
 const db = require("../Models");
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
 module.exports = () => {
   const sshConfig = {
-    username: "godwin.makyao",
-    password: "Namweltyner123!@#",
+    username: process.env.SSH_USERNAME,
+    password: process.env.SSH_PASSWORD,
   };
   const Device = db.devices;
   const SwitchConfiguration = db.switchConfiguration;

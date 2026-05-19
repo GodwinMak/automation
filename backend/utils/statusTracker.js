@@ -12,6 +12,8 @@ const statusCache = {
   DIA: new Map(),
   IPT: new Map(),
   SHARED: new Map(),
+  L3VPN: new Map(),
+  FTTH: new Map(),
 };
 
 // Off-hours configuration (22:00 - 04:00)
@@ -39,8 +41,8 @@ const isOffHours = () => {
  * @returns {boolean} true if tracking should be skipped
  */
 const shouldSkipTracking = (customerType) => {
-  // IPT customers are always tracked (enterprise/business critical)
-  if (customerType === "IPT") {
+  // IPT, L3VPN, and FTTH are always tracked (24/7)
+  if (customerType === "IPT" || customerType === "L3VPN" || customerType === "FTTH") {
     return false;
   }
   // DIA and SHARED are home/office customers - skip during off-hours
@@ -79,6 +81,8 @@ const initializeCache = async () => {
     console.log(`  - DIA: ${statusCache.DIA.size} interfaces`);
     console.log(`  - IPT: ${statusCache.IPT.size} interfaces`);
     console.log(`  - SHARED: ${statusCache.SHARED.size} interfaces`);
+    console.log(`  - L3VPN: ${statusCache.L3VPN.size} interfaces`);
+    console.log(`  - FTTH: ${statusCache.FTTH.size} interfaces`);
   } catch (error) {
     console.error("[StatusTracker] Error initializing cache:", error.message);
   }
@@ -277,12 +281,36 @@ const getSharedCustomerInfoMap = async () => {
   return customerInfoMap;
 };
 
+/**
+ * Get customer info map for L3VPN customers
+ */
+const getL3vpnCustomerInfoMap = async () => {
+  const customerInfoMap = {};
+  try {
+    const customers = await db.l3vpncustomerinfos.findAll({
+      attributes: ["id", "interface", "customerName", "cid", "nbr"],
+    });
+    for (const c of customers) {
+      customerInfoMap[c.interface] = {
+        id: c.id,
+        customerName: c.customerName,
+        cid: c.cid,
+        nbr: c.nbr,
+      };
+    }
+  } catch (error) {
+    console.error("[StatusTracker] Error fetching L3VPN customer info:", error.message);
+  }
+  return customerInfoMap;
+};
+
 module.exports = {
   initializeCache,
   trackStatusChanges,
   getDiaCustomerInfoMap,
   getIptCustomerInfoMap,
   getSharedCustomerInfoMap,
+  getL3vpnCustomerInfoMap,
   statusCache,
   isOffHours,
   shouldSkipTracking,

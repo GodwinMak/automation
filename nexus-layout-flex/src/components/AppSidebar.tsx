@@ -24,6 +24,7 @@ import {
   FileText,
   MapPin,
   Activity,
+  Layers,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -84,6 +85,8 @@ const allNavigationItems: NavigationItem[] = [
       { title: "DIA Customers", url: "/dia-customer", icon: PieChart },
       { title: "IPT Customers", url: "/ipt-customer", icon: TrendingUp },
       { title: "Shared Customers", url: "/shared-customer", icon: Share2 },
+      { title: "L3VPN Customers", url: "/l3vpn-customer", icon: Layers },
+      { title: "FTTH Customers", url: "/ftth-customer", icon: Wifi },
     ],
     icon: User,
   },
@@ -158,6 +161,7 @@ const allNavigationItems: NavigationItem[] = [
     icon: BarChart3,
     permission: "canView95thReport",
   },
+  { title: "FTTH Reports", url: "/ftth-reports", icon: FileText },
   {
     title: "User Management",
     url: "/user-management",
