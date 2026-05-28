@@ -402,7 +402,7 @@ exports.uploadFTTHChurnReport = async (req, res) => {
 
     // --- 2. Fetch all existing customerIDs from ftthcustomer (whitelist) ---
     const allFtthCustomers = await FTTHCustomer.findAll({
-      attributes: ["id", "customerID", "customerName"],
+      attributes: ["id", "customerID", "customerName", "homeNumber"],
     });
     const ftthCustomerMap = new Map(allFtthCustomers.map((c) => [c.customerID, c]));
 
@@ -436,7 +436,7 @@ exports.uploadFTTHChurnReport = async (req, res) => {
 
       // Sync fields back onto ftthcustomer
       const updates = {
-        homeNumber: row.homeNumber || ftthRecord.homeNumber,
+        homeNumber: ftthRecord.homeNumber || row.homeNumber, // only fill if DB has no number
         topUpExpiry: row.topUpExpiry || ftthRecord.topUpExpiry,
         isExpired,
         // Reset alive-while-expired flag when expiry date changes (re-evaluate on next ping)

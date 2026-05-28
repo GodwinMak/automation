@@ -106,7 +106,7 @@ const FTTHReports = () => {
     .reverse()
     .map((r) => ({
       date: r.reportDate,
-      "Alive While Expired": r.aliveWhileExpiredCount,
+      "Live While Expired": r.aliveWhileExpiredCount,
       "Not in Churn Report": r.notInInfoCount,
     }));
 
@@ -125,7 +125,7 @@ const FTTHReports = () => {
       color: "text-blue-600 dark:text-blue-400",
     },
     {
-      label: "Total Alive While Expired",
+      label: "Total Live While Expired",
       value: totalAlive,
       icon: <Activity className="h-5 w-5 text-orange-500" />,
       color: "text-orange-600 dark:text-orange-400",
@@ -183,7 +183,7 @@ const FTTHReports = () => {
             <Card className="border border-border">
               <CardHeader>
                 <CardTitle className="text-base">
-                  30-Day Trend — Alive While Expired &amp; Not in Churn Report
+                  30-Day Trend — Live While Expired &amp; Not in Churn Report
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -201,7 +201,7 @@ const FTTHReports = () => {
                       labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                     />
                     <Legend />
-                    <Bar dataKey="Alive While Expired" fill="#f97316" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Live While Expired" fill="#f97316" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="Not in Churn Report" fill="#eab308" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -226,7 +226,7 @@ const FTTHReports = () => {
                       <tr className="border-b border-border bg-muted/30">
                         <th className="text-left px-4 py-3 text-xs text-muted-foreground font-medium">Date</th>
                         <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Expired Checked</th>
-                        <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Alive While Expired</th>
+                        <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Live While Expired</th>
                         <th className="text-right px-4 py-3 text-xs text-muted-foreground font-medium">Not in Churn Report</th>
                         <th className="px-4 py-3" />
                       </tr>
@@ -321,7 +321,7 @@ const FTTHReports = () => {
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Alive While Expired
+                Live While Expired
                 {customers && (
                   <span className="ml-1.5 text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-1.5 py-0.5 rounded-full">
                     {customers.aliveWhileExpired.length}
@@ -358,7 +358,7 @@ const FTTHReports = () => {
               ) : activeTab === "alive" ? (
                 customers.aliveWhileExpired.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-12">
-                    No customers were alive while expired on this day.
+                    No customers were live while expired on this day.
                   </p>
                 ) : (
                   <table className="w-full text-sm">

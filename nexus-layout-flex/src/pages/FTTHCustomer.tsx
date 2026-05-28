@@ -207,6 +207,7 @@ const FTTHCustomer = () => {
     { key: "pppoeusername", label: "PPPoE Username" },
     { key: "ip", label: "IP Address" },
     { key: "ip_version", label: "IP Version" },
+    { key: "homeNumber", label: "Home Number" },
     { key: "status", label: "Status" },
     { key: "topUpExpiry", label: "Expiry", render: expiryRenderer },
   ];

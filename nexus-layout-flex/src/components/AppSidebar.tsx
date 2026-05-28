@@ -25,6 +25,7 @@ import {
   MapPin,
   Activity,
   Layers,
+  MessageSquare,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -162,6 +163,7 @@ const allNavigationItems: NavigationItem[] = [
     permission: "canView95thReport",
   },
   { title: "FTTH Reports", url: "/ftth-reports", icon: FileText },
+  { title: "SMS Broadcast", url: "/sms-broadcast", icon: MessageSquare },
   {
     title: "User Management",
     url: "/user-management",

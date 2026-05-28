@@ -342,6 +342,61 @@ export default function ChurnAnalysis() {
     return base.filter((c) => c.churnRisk === ftthRiskFilter);
   }, [ftthDowntime, ftthRiskFilter, searchQuery]);
 
+  // Export FTTH Extended Downtime (filtered) to CSV
+  const handleExportFtthDowntime = () => {
+    const data = filteredFtthDowntime;
+    if (!data.length) {
+      toast.info("No FTTH extended downtime data to export");
+      return;
+    }
+
+    const headers = [
+      "PPPoE Username",
+      "IP Address",
+      "Customer ID",
+      "Home Number",
+      "Down Since",
+      "Duration",
+      "Churn Risk",
+      "Source",
+    ];
+
+    const escapeCsv = (value: any) => {
+      if (value === null || value === undefined) return "";
+      const str = String(value);
+      if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const rows = data.map((c) => [
+      c.customerName || "",
+      c.interface || "",
+      c.cid || "",
+      c.nbr || "",
+      c.downSince ? new Date(c.downSince).toLocaleString() : "Unknown",
+      c.downtimeFormatted || "",
+      c.churnRisk || "unknown",
+      c.source || "",
+    ]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map(escapeCsv).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `ftth_extended_downtime.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Export Extended Downtime (filtered) to CSV/Excel
   const handleExportExtendedDowntime = () => {
     const data = filteredDowntime;
@@ -1093,6 +1148,14 @@ export default function ChurnAnalysis() {
                       Clear filter ✕
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-5 px-2 text-xs py-4 ring-2 ring-teal-400 ring-offset-2 ring-offset-background"
+                    onClick={handleExportFtthDowntime}
+                  >
+                    Export Excel
+                  </Button>
                 </div>
                 {ftthRiskFilter && (
                   <p className="text-sm font-medium">
@@ -1108,6 +1171,8 @@ export default function ChurnAnalysis() {
                     <TableRow>
                       <TableHead>PPPoE Username</TableHead>
                       <TableHead>IP Address</TableHead>
+                      <TableHead>Customer ID</TableHead>
+                      <TableHead>Home Number</TableHead>
                       <TableHead>Down Since</TableHead>
                       <TableHead>Duration</TableHead>
                       <TableHead>Churn Risk</TableHead>
@@ -1116,7 +1181,7 @@ export default function ChurnAnalysis() {
                   <TableBody>
                     {ftthDowntime.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                           No FTTH customers with extended downtime found
                         </TableCell>
                       </TableRow>
@@ -1140,6 +1205,8 @@ export default function ChurnAnalysis() {
                             </div>
                           </TableCell>
                           <TableCell className="font-mono text-sm text-teal-400">{customer.interface || "-"}</TableCell>
+                          <TableCell className="text-sm">{customer.cid || "-"}</TableCell>
+                          <TableCell className="text-sm">{customer.nbr || "-"}</TableCell>
                           <TableCell className="text-sm">
                             {customer.downSince
                               ? new Date(customer.downSince).toLocaleString()

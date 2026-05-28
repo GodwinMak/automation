@@ -54,6 +54,7 @@ db.pitchForUpgradeReports = require("./pitchForUpgradeReport.js")(sequelize, Dat
 db.switchConfiguration = require("./switchConfiguration.js")(sequelize, DataTypes);
 db.isisAdjacency = require("./isisAdjacent.js")(sequelize, DataTypes);
 db.push_tokens = require("./pushToken.js")(sequelize, DataTypes);
+db.smsCampaigns = require("./smsCampaign.js")(sequelize, DataTypes);
 
 
 

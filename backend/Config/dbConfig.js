@@ -7,9 +7,9 @@ module.exports = {
   dialect: "mysql",
 
   pool: {
-    max: 5, // maximum number of connection in pool
-    min: 0, // minimum number of connection in pool
-    acquire: 30000, // maximum time, in milliseconds, that pool will try to get connection before throwing error
-    idle: 10000, // maximum time, in milliseconds, that a connection can be idle before being released
+    max: 20,    // raised from 5 — supports concurrent authenticated requests
+    min: 2,     // keep a couple warm connections ready
+    acquire: 60000, // wait up to 60s before throwing a timeout
+    idle: 30000,    // release idle connections after 30s
   },
 };

@@ -3,6 +3,31 @@ const db = require("../Models");
 const Users = db.users;
 
 /**
+ * Simple in-memory user cache to avoid a DB round-trip on every request.
+ * TTL: 5 minutes — short enough to pick up deactivations promptly.
+ */
+const USER_CACHE_TTL_MS = 5 * 60 * 1000;
+const userCache = new Map();
+
+function getCachedUser(userId) {
+  const entry = userCache.get(userId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    userCache.delete(userId);
+    return null;
+  }
+  return entry.user;
+}
+
+function setCachedUser(userId, user) {
+  userCache.set(userId, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+}
+
+function invalidateUserCache(userId) {
+  userCache.delete(userId);
+}
+
+/**
  * Role-based permissions configuration
  */
 const ROLE_PERMISSIONS = {
@@ -59,9 +84,13 @@ const verifyToken = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Get user from database to ensure they still exist and get current role
-    const user = await Users.findByPk(decoded.userId);
+
+    // Try cache first to avoid a DB hit on every request
+    let user = getCachedUser(decoded.userId);
+    if (!user) {
+      user = await Users.findByPk(decoded.userId);
+      if (user) setCachedUser(decoded.userId, user);
+    }
     
     if (!user) {
       return res.status(401).json({ message: "User not found" });
@@ -169,5 +198,6 @@ module.exports = {
   adminOrOperator,
   getPermissionsForRole,
   ROLE_PERMISSIONS,
+  invalidateUserCache,
 };
 

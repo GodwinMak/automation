@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { MessageCircle } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -42,6 +43,7 @@ import ViewL3VPNCustomer from "./pages/ViewL3VPNCustomer";
 import ViewFTTHCustomer from "./pages/ViewFTTHCustomer";
 import FTTHCustomer from "./pages/FTTHCustomer";
 import FTTHReports from "./pages/FTTHReports";
+import SmsBroadcast from "./pages/SmsBroadcast";
 
 const queryClient = new QueryClient();
 
@@ -60,6 +62,23 @@ const App = () => {
             <Toaster />
             <Sonner />
             <BrowserRouter>
+              {/* Msaada Chatbot floating button — visible on all pages */}
+              <a
+                href="https://chatbot.liquidmatics.co.tz"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Msaada - AI Assistant"
+                className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-1.5 group"
+              >
+                <div className="relative bg-gradient-to-br from-emerald-400 to-teal-600 hover:from-emerald-300 hover:to-teal-500 text-white rounded-full w-16 h-16 flex items-center justify-center shadow-xl shadow-teal-900/60 transition-all duration-200 group-hover:scale-110 group-hover:shadow-teal-500/50">
+                  {/* Pulse ring */}
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-30 animate-ping" />
+                  <MessageCircle className="h-7 w-7 drop-shadow" />
+                </div>
+                <span className="bg-teal-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-full shadow tracking-wide group-hover:bg-teal-500 transition-colors">
+                  Msaada
+                </span>
+              </a>
               <Routes>
                 {/* Public route - Login */}
                 <Route path="/" element={<Login />} />
@@ -157,6 +176,14 @@ const App = () => {
                     element={
                       <ProtectedRoute>
                         <FTTHReports />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/sms-broadcast"
+                    element={
+                      <ProtectedRoute>
+                        <SmsBroadcast />
                       </ProtectedRoute>
                     }
                   />

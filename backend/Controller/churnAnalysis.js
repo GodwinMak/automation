@@ -229,7 +229,7 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     if (!customerType || customerType === "FTTH") {
       const ftthDownRaw = await db.ftthcustomers.findAll({
         where: { status: "down" },
-        attributes: ["ip", "pppoeusername", "ip_version"],
+        attributes: ["ip", "pppoeusername", "ip_version", "customerID", "homeNumber"],
         raw: true,
       });
       for (const c of ftthDownRaw) {
@@ -240,6 +240,8 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
           customerType: "FTTH",
           pppoeusername: c.pppoeusername,
           ip_version: c.ip_version,
+          cid: c.customerID || null,
+          nbr: c.homeNumber || null,
         });
       }
     }
@@ -287,9 +289,14 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
 
       const downSince = new Date(record.changedAt);
       const downtimeSeconds = Math.floor((now - downSince) / 1000);
-      
+      const actualInfo = actualDownInterfaces.get(key);
+
       results.push({
         ...record,
+        // Fall back to live values from main table for fields that may have been
+        // stored as null in history (e.g. FTTH homeNumber stored before the fix)
+        nbr: record.nbr || actualInfo?.nbr || null,
+        cid: record.cid || actualInfo?.cid || null,
         downSince,
         downtimeSeconds,
         downtimeFormatted: formatDuration(downtimeSeconds),
@@ -366,8 +373,8 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
           customerType: "FTTH",
           switchName: null,
           customerName: c.pppoeusername || null,
-          cid: null,
-          nbr: null,
+          cid: c.cid || null,
+          nbr: c.nbr || null,
           previousStatus: "unknown",
           newStatus: "down",
           status: "down",

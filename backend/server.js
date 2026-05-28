@@ -46,6 +46,7 @@ const pushTokenRoutes = require("./routes/pushToken");
 const l3vpnCustomerRoutes = require("./routes/l3vpncustomer");
 const ftthCustomerRoutes = require("./routes/ftthcustomer");
 const ftthReportRoutes = require("./routes/ftthReport");
+const smsRoutes = require("./routes/sms");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -75,6 +76,7 @@ app.use("/push-token", pushTokenRoutes);
 app.use("/l3vpncustomers", l3vpnCustomerRoutes);
 app.use("/ftthcustomers", ftthCustomerRoutes);
 app.use("/ftth-reports", ftthReportRoutes);
+app.use("/sms", smsRoutes);
 
 
 const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);

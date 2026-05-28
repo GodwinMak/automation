@@ -2,7 +2,7 @@ const db = require("../Models");
 const Users = db.users;
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { getPermissionsForRole } = require("../middleware/auth");
+const { getPermissionsForRole, invalidateUserCache } = require("../middleware/auth");
 
 /**
  * Register a new user (public - creates first admin or self-registration)
@@ -173,7 +173,10 @@ exports.updateProfile = async (req, res) => {
 
     await user.save();
 
-    res.status(200).send({ 
+    // Bust the auth cache so new role/password is picked up immediately
+    invalidateUserCache(user.id);
+
+    res.status(200).send({
       message: "Profile updated successfully",
       passwordChanged: !!password,
       user: {
@@ -352,6 +355,9 @@ exports.updateById = async (req, res) => {
     }
 
     await user.save();
+
+    // Bust cache — role, isActive, or password may have changed
+    invalidateUserCache(user.id);
 
     res.status(200).send({ 
       message: "User updated successfully", 

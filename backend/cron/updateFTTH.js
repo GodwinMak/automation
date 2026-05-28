@@ -145,13 +145,13 @@ module.exports = (io) => {
 
       // Track status changes for churn analysis
       const allFtthCustomers = await ftthcustomer.findAll({
-        attributes: ["ip", "pppoeusername", "customerID", "customerName", "status"],
+        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber", "status"],
         raw: true,
       });
       const ftthInfoMap = Object.fromEntries(
         allFtthCustomers.map((r) => [
           r.ip,
-          { customerName: r.customerName || r.pppoeusername, cid: r.customerID || null, nbr: null },
+          { customerName: r.customerName || r.pppoeusername, cid: r.customerID || null, nbr: r.homeNumber || null },
         ])
       );
       await trackStatusChanges(
