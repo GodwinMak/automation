@@ -80,6 +80,8 @@ module.exports = (sequelize, DataTypes) => {
         { fields: ["previousStatus", "newStatus"] },
         { fields: ["customerName"] },
         { fields: ["nbr"] },
+        // Composite index for the "latest per group" subquery used in getExtendedDowntimeCustomers
+        { name: "idx_sch_type_iface_at", fields: ["customerType", "interface", "changedAt"] },
       ],
     }
   );

@@ -1,5 +1,5 @@
 const db = require("../Models");
-const { Op, fn, col, literal } = require("sequelize");
+const { Op, fn, col, literal, QueryTypes } = require("sequelize");
 
 const StatusChangeHistory = db.statusChangeHistories;
 const Favorites = db.favorites;
@@ -194,10 +194,37 @@ exports.getUnstableCustomers = async (req, res) => {
  */
 exports.getExtendedDowntimeCustomers = async (req, res) => {
   try {
-    const { customerType } = req.query;
+    const { customerType, excludeFtth } = req.query;
+    const excludeFtthFlag = ["1", "true", "yes"].includes(
+      String(excludeFtth || "").toLowerCase()
+    );
     const now = new Date();
     let results = [];
     const seenInterfaces = new Set();
+
+    // Short-circuit if FTTH is explicitly excluded
+    if (excludeFtthFlag && customerType === "FTTH") {
+      return res.json({
+        totalCurrentlyDown: 0,
+        trackedCount: 0,
+        untrackedCount: 0,
+        skippedBecauseActuallyUp: 0,
+        data: {
+          ftth: {
+            totalCurrentlyDown: 0,
+            trackedCount: 0,
+            untrackedCount: 0,
+            results: [],
+          },
+          nonFtth: {
+            totalCurrentlyDown: 0,
+            trackedCount: 0,
+            untrackedCount: 0,
+            results: [],
+          },
+        },
+      });
+    }
 
     // ========== STEP 1: Get ACTUAL current status from main tables ==========
     // This is the source of truth for current status
@@ -226,7 +253,7 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     ]);
 
     // FTTH uses 'status' instead of 'operationalStatus' and 'ip' as identifier
-    if (!customerType || customerType === "FTTH") {
+    if (!excludeFtthFlag && (!customerType || customerType === "FTTH")) {
       const ftthDownRaw = await db.ftthcustomers.findAll({
         where: { status: "down" },
         attributes: ["ip", "pppoeusername", "ip_version", "customerID", "homeNumber"],
@@ -251,22 +278,37 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     // ========== STEP 2: Get from Status Change History (with verification) ==========
     // Find customers whose LAST status change was to "down"
     // BUT only if they're ACTUALLY down in the main table
-    const historyWhereClause = {};
-    if (customerType) historyWhereClause.customerType = customerType;
-
-    const allChanges = await StatusChangeHistory.findAll({
-      where: historyWhereClause,
-      order: [["changedAt", "DESC"]],
-      raw: true,
-    });
-
-    // Group by interface and get the most recent status for each
-    const latestStatusByInterface = new Map();
-    for (const change of allChanges) {
-      const key = `${change.customerType}:${change.interface}`;
-      if (!latestStatusByInterface.has(key)) {
-        latestStatusByInterface.set(key, change);
+    //
+    // Use a GROUP BY subquery to fetch ONLY the latest row per (interface, customerType)
+    // instead of loading every row into memory.
+    const typeFilter = customerType
+      ? "WHERE customerType = :customerType"
+      : excludeFtthFlag
+        ? "WHERE customerType != 'FTTH'"
+        : "";
+    const latestRows = await db.sequelize.query(
+      `SELECT s.*
+       FROM statusChangeHistories s
+       INNER JOIN (
+         SELECT interface, customerType, MAX(changedAt) AS maxChangedAt
+         FROM statusChangeHistories
+         ${typeFilter}
+         GROUP BY interface, customerType
+       ) latest
+         ON  s.interface    = latest.interface
+         AND s.customerType = latest.customerType
+         AND s.changedAt    = latest.maxChangedAt`,
+      {
+        replacements: customerType ? { customerType } : {},
+        type: QueryTypes.SELECT,
       }
+    );
+
+    // Build the map from the already-deduplicated result set
+    const latestStatusByInterface = new Map();
+    for (const change of latestRows) {
+      const key = `${change.customerType}:${change.interface}`;
+      latestStatusByInterface.set(key, change);
     }
 
     // Filter to only those:
@@ -316,24 +358,34 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     const fetchUntrackedFromTable = async (model, infoModel, type) => {
       if (customerType && customerType !== type) return [];
 
-      const untrackedDown = [];
-      
+      // Collect untracked entries first (no DB calls yet)
+      const untrackedEntries = [];
       for (const [key, c] of actualDownInterfaces.entries()) {
         if (c.customerType !== type) continue;
         if (seenInterfaces.has(key)) continue; // Already in tracked results
+        untrackedEntries.push({ key, c });
+      }
 
-        // Get customer info
-        let customerInfo = {};
-        if (infoModel) {
-          const info = await infoModel.findOne({
-            where: { interface: c.interface },
-            attributes: ["customerName", "cid", "nbr"],
-            raw: true,
-          });
-          if (info) customerInfo = info;
+      if (!untrackedEntries.length) return [];
+
+      // Batch-load customer info in a single query instead of N individual findOne calls
+      const infoMap = new Map();
+      if (infoModel) {
+        const interfaces = untrackedEntries.map((e) => e.c.interface);
+        const infos = await infoModel.findAll({
+          where: { interface: { [Op.in]: interfaces } },
+          attributes: ["interface", "customerName", "cid", "nbr"],
+          raw: true,
+        });
+        for (const info of infos) {
+          infoMap.set(info.interface, info);
         }
+      }
 
-        untrackedDown.push({
+      return untrackedEntries.map(({ key, c }) => {
+        seenInterfaces.add(key);
+        const customerInfo = infoMap.get(c.interface) || {};
+        return {
           interface: c.interface,
           customerType: type,
           switchName: c.switchName,
@@ -347,10 +399,8 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
           downtimeFormatted: "Unknown (before tracking)",
           churnRisk: "unknown",
           source: "untracked", // Down since before tracking started
-        });
-        seenInterfaces.add(key);
-      }
-      return untrackedDown;
+        };
+      });
     };
 
     // Fetch untracked from all tables
@@ -361,7 +411,7 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
 
     // FTTH untracked (ip is the identifier, pppoeusername is the customer name)
     const ftthDown = [];
-    if (!customerType || customerType === "FTTH") {
+    if (!excludeFtthFlag && (!customerType || customerType === "FTTH")) {
       for (const [key, c] of actualDownInterfaces.entries()) {
         if (c.customerType !== "FTTH") continue;
         if (seenInterfaces.has(key)) continue;
@@ -422,12 +472,28 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       return 0;
     });
 
+    const ftthResults = results.filter((r) => r.customerType === "FTTH");
+    const nonFtthResults = results.filter((r) => r.customerType !== "FTTH");
+
     res.json({
       totalCurrentlyDown: results.length,
       trackedCount: trackedDownCount,
       untrackedCount: results.length - trackedDownCount,
       skippedBecauseActuallyUp, // For debugging
-      data: results,
+      data: {
+        ftth: {
+          totalCurrentlyDown: ftthResults.length,
+          trackedCount: ftthResults.filter((r) => r.source === "tracked").length,
+          untrackedCount: ftthResults.filter((r) => r.source === "untracked").length,
+          results: ftthResults,
+        },
+        nonFtth: {
+          totalCurrentlyDown: nonFtthResults.length,
+          trackedCount: nonFtthResults.filter((r) => r.source === "tracked").length,
+          untrackedCount: nonFtthResults.filter((r) => r.source === "untracked").length,
+          results: nonFtthResults,
+        },
+      },
     });
   } catch (error) {
     console.error("Error fetching extended downtime customers:", error);
