@@ -10,6 +10,9 @@ module.exports = (io) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
+    readyTimeout: 15000,
+    keepaliveInterval: 10000,
+    keepaliveCountMax: 2,
   };
 
   // === DATABASE MODELS ===
@@ -659,10 +662,19 @@ module.exports = (io) => {
     }
   };
   const runAll = async () => {
+    const [[{ acquired }]] = await db.sequelize.query(
+      "SELECT GET_LOCK('l3vpn_cron_update', 0) AS acquired"
+    );
+    if (!acquired) {
+      console.warn("[L3VPN] Another instance is already running — skipping this tick.");
+      return;
+    }
     try {
       await updateL3VPN();
     } catch (error) {
       console.error("[L3VPN Updater] ❌ Error in runAll:", error.message);
+    } finally {
+      await db.sequelize.query("SELECT RELEASE_LOCK('l3vpn_cron_update')");
     }
   };
 

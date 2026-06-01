@@ -10,6 +10,9 @@ module.exports = (io) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
+    readyTimeout: 15000,
+    keepaliveInterval: 10000,
+    keepaliveCountMax: 2,
   };
 
   const Device = db.devices;
@@ -328,10 +331,19 @@ module.exports = (io) => {
   }
 
   const runAll = async () => {
+    const [[{ acquired }]] = await db.sequelize.query(
+      "SELECT GET_LOCK('shared_cron_update', 0) AS acquired"
+    );
+    if (!acquired) {
+      console.warn("[Shared] Another instance is already running — skipping this tick.");
+      return;
+    }
     try {
       await updateShared(); // ✅ Run first
     } catch (err) {
       console.error("[Main Runner] Fatal error:", err.message);
+    } finally {
+      await db.sequelize.query("SELECT RELEASE_LOCK('shared_cron_update')");
     }
   };
   cron.schedule("*/5 * * * *", runAll);

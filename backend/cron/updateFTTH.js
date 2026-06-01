@@ -11,6 +11,9 @@ module.exports = (io) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
+    readyTimeout: 15000,      // fail fast if BNG is unreachable
+    keepaliveInterval: 10000, // detect dead sockets
+    keepaliveCountMax: 2,
   };
 
   const bng = [
@@ -79,6 +82,17 @@ module.exports = (io) => {
   const updateFTTHData = async () => {
     const ftthcustomer = db.ftthcustomers;
 
+    // Distributed lock across all PM2 instances via MySQL advisory lock.
+    // GET_LOCK('name', 0) returns 1 if acquired, 0 if another connection holds it.
+    const [[{ acquired }]] = await db.sequelize.query(
+      "SELECT GET_LOCK('ftth_cron_update', 0) AS acquired"
+    );
+    if (!acquired) {
+      console.warn("[FTTH] Another instance is already running — skipping this tick.");
+      return;
+    }
+
+    const runStart = new Date();
     try {
       const bngResults = await Promise.all(
         bng.map(async (device) => {
@@ -125,18 +139,18 @@ module.exports = (io) => {
       // (handles IPv6→IPv4 switch where same username gets a new IP)
       const upRecords = allRecords.map((r) => ({ ...r, status: "up" }));
       await ftthcustomer.bulkCreate(upRecords, {
-        updateOnDuplicate: ["ip", "ip_version", "status"],
+        // Include updatedAt so Sequelize stamps it on upsert — we use it below
+        updateOnDuplicate: ["ip", "ip_version", "status", "updatedAt"],
       });
 
       console.log(`[FTTH] Upserted ${allRecords.length} subscriber(s) as up.`);
 
-      // Mark as "down" any username NOT currently seen on BNG.
-      // Using pppoeusername (not IP) so that IP reassignment between subscribers
-      // doesn't leave stale "up" records for disconnected users.
-      const activeUsernames = allRecords.map((r) => r.pppoeusername);
+      // Mark as "down" any record not touched in this run.
+      // Comparing updatedAt < runStart avoids a NOT IN (thousands of usernames)
+      // query that caused table-lock deadlocks between overlapping cron runs.
       const [downCount] = await ftthcustomer.update(
         { status: "down" },
-        { where: { pppoeusername: { [Op.notIn]: activeUsernames } } }
+        { where: { updatedAt: { [Op.lt]: runStart } } }
       );
 
       if (downCount > 0) {
@@ -162,6 +176,8 @@ module.exports = (io) => {
 
     } catch (error) {
       console.error("[FTTH] Error updating FTTH data:", error);
+    } finally {
+      await db.sequelize.query("SELECT RELEASE_LOCK('ftth_cron_update')");
     }
   };
 

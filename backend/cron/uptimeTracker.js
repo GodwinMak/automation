@@ -19,50 +19,38 @@ const recordSnapshot = async () => {
   console.log(`[Uptime Tracker] Recording snapshot for ${date} hour ${hour}`);
 
   try {
-    // DIA Statistics
-    const diaUp = await DiaCustomer.count({ where: { operationalStatus: "up" } });
-    const diaDown = await DiaCustomer.count({ where: { operationalStatus: "down" } });
+    // Run all statistics queries in parallel to reduce total DB round-trips
+    const [
+      diaUp, diaDown,
+      diaUpCapacity, diaTotalCapacity,
+      iptUp, iptDown,
+      iptUpCapacity, iptTotalCapacity,
+      sharedUp, sharedDown,
+      sharedUpCapacity, sharedTotalCapacity,
+    ] = await Promise.all([
+      DiaCustomer.count({ where: { operationalStatus: "up" } }),
+      DiaCustomer.count({ where: { operationalStatus: "down" } }),
+      CustomerInfo.sum("downmbps", {
+        include: [{ model: DiaCustomer, attributes: [], where: { operationalStatus: "up" } }],
+      }).then(v => v || 0),
+      CustomerInfo.sum("downmbps").then(v => v || 0),
+      IptCustomer.count({ where: { operationalStatus: "up" } }),
+      IptCustomer.count({ where: { operationalStatus: "down" } }),
+      IptCustomerInfo.sum("downmbps", {
+        include: [{ model: IptCustomer, attributes: [], where: { operationalStatus: "up" } }],
+      }).then(v => v || 0),
+      IptCustomerInfo.sum("downmbps").then(v => v || 0),
+      SharedCustomer.count({ where: { operationalStatus: "up" } }),
+      SharedCustomer.count({ where: { operationalStatus: "down" } }),
+      SharedCustomerInfo.sum("capacity", {
+        include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "up" } }],
+      }).then(v => v || 0),
+      SharedCustomerInfo.sum("capacity").then(v => v || 0),
+    ]);
+
     const diaTotal = diaUp + diaDown;
-    
-    const diaUpCapacity = await CustomerInfo.sum("downmbps", {
-      include: [{
-        model: DiaCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-    }) || 0;
-    
-    const diaTotalCapacity = await CustomerInfo.sum("downmbps") || 0;
-
-    // IPT Statistics
-    const iptUp = await IptCustomer.count({ where: { operationalStatus: "up" } });
-    const iptDown = await IptCustomer.count({ where: { operationalStatus: "down" } });
     const iptTotal = iptUp + iptDown;
-    
-    const iptUpCapacity = await IptCustomerInfo.sum("downmbps", {
-      include: [{
-        model: IptCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-    }) || 0;
-    
-    const iptTotalCapacity = await IptCustomerInfo.sum("downmbps") || 0;
-
-    // Shared Statistics
-    const sharedUp = await SharedCustomer.count({ where: { operationalStatus: "up" } });
-    const sharedDown = await SharedCustomer.count({ where: { operationalStatus: "down" } });
     const sharedTotal = sharedUp + sharedDown;
-    
-    const sharedUpCapacity = await SharedCustomerInfo.sum("capacity", {
-      include: [{
-        model: SharedCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-    }) || 0;
-    
-    const sharedTotalCapacity = await SharedCustomerInfo.sum("capacity") || 0;
 
     // Calculate percentages
     const diaUptimePercent = diaTotal > 0 ? (diaUp / diaTotal) * 100 : 0;

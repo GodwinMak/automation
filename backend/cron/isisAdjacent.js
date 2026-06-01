@@ -121,6 +121,15 @@ module.exports = (io) => {
   };
 
   const checkAdjacency = async () => {
+    // MySQL advisory lock to prevent overlapping runs in PM2 cluster
+    const [[{ acquired }]] = await db.sequelize.query(
+      "SELECT GET_LOCK('isis_adjacent_cron', 0) AS acquired"
+    );
+    if (!acquired) {
+      console.warn("[ISIS] Another instance is already running — skipping this tick.");
+      return;
+    }
+    try {
     const devices = await Devices.findAll({
       where: { ip: { [Op.notIn]: ["41.175.37.22", "41.175.37.23"] } },
     });
@@ -295,6 +304,9 @@ module.exports = (io) => {
       } catch (err) {
         console.error(`[ISIS] ✗ ${device.ip}: ${err.message}`);
       }
+    }
+    } finally {
+      await db.sequelize.query("SELECT RELEASE_LOCK('isis_adjacent_cron')");
     }
   };
 

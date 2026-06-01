@@ -10,6 +10,9 @@ module.exports = (io) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
+    readyTimeout: 15000,      // fail fast if switch is unreachable
+    keepaliveInterval: 10000, // detect dead sockets
+    keepaliveCountMax: 2,
   };
 
   const Device = db.devices;
@@ -169,8 +172,6 @@ module.exports = (io) => {
       );
 
       if (!match) {
-        console.log(`[parsePolicerOutput] Skipping line: ${line}`);
-
         continue;
       }
 
@@ -204,9 +205,6 @@ module.exports = (io) => {
         entry.downmbps = mbps; // output-policer → downmbps
       }
 
-      console.log(
-        `[parsePolicerOutput] Parsed ${key}: direction=${direction}, mbps=${mbps}`
-      );
     }
 
     console.log(
@@ -280,8 +278,6 @@ module.exports = (io) => {
         const entry = policerMap.get(info.interface);
 
         if (!entry) {
-          console.log(`[BandwidthUpdater] No policer for ${info.interface}`);
-
           continue;
         }
 
@@ -940,11 +936,20 @@ module.exports = (io) => {
   };
 
   const runAll = async () => {
+    const [[{ acquired }]] = await db.sequelize.query(
+      "SELECT GET_LOCK('ipt_cron_update', 0) AS acquired"
+    );
+    if (!acquired) {
+      console.warn("[IPT] Another instance is already running — skipping this tick.");
+      return;
+    }
     try {
       await updateIPT(); // ✅ Run first
       await updateAggDevicesIPT();// ✅ Run second
     } catch (err) {
       console.error("[Main Runner] Fatal error:", err.message);
+    } finally {
+      await db.sequelize.query("SELECT RELEASE_LOCK('ipt_cron_update')");
     }
   };
   cron.schedule("*/5 * * * *", runAll);

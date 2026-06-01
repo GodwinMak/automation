@@ -63,8 +63,12 @@ export function Navbar() {
 
   useEffect(() => {
 
-    const socket = io(`${PRODUCTION_URL}`);
-    socketRef.current = socket;
+      // 🚀 CRITICAL FIX: Add options object with transports: ["websocket"]
+      const socket = io(`${PRODUCTION_URL}`, {
+        transports: ["websocket"],
+        upgrade: false
+      });
+      socketRef.current = socket;
 
     // Register userId with backend for targeted notifications
     if (user && user.id) {

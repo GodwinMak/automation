@@ -44,95 +44,59 @@ const checkDiaOverusage = async () => {
         let customersWithOverusage = 0;
         const overusageResults = [];
 
-      for (const customer of diaCustomers) {
+      // Process customers 5 at a time to run Zabbix calls concurrently
+      const checkOverusage = async (customer) => {
         const infos = customer.customerinfos || [];
         const info = Array.isArray(infos) ? infos[0] : infos;
-
-        if (!info) {
-          continue;
-        }
-
+        if (!info) return null;
         const { upmbps, downmbps, customerName, cid, nbr, port } = info;
-
-        if (!upmbps && !downmbps) {
-          // No capacity configured, skip
-          continue;
-        }
-
+        if (!upmbps && !downmbps) return null;
         const interfaceName = customer.interface;
         const switchName = customer.switchName;
-
-        if (!interfaceName || !switchName) {
-          continue;
-        }
-
-        // Fetch last 24 hours of history from Zabbix
+        if (!interfaceName || !switchName) return null;
         const zabbixData = await getZabbixHistory(interfaceName, switchName, 24);
-
-        if (!zabbixData || !zabbixData.sentData || !zabbixData.recvData) {
-          continue;
-        }
-
+        if (!zabbixData || !zabbixData.sentData || !zabbixData.recvData) return null;
         const { sentData, recvData } = zabbixData;
-
-        // Convert Mbps capacity to bps and apply 130% threshold
         const upCapacityBps = upmbps ? upmbps * 1e6 : 0;
         const downCapacityBps = downmbps ? downmbps * 1e6 : 0;
-
         const upThreshold = upCapacityBps > 0 ? upCapacityBps * 1.3 : 0;
         const downThreshold = downCapacityBps > 0 ? downCapacityBps * 1.3 : 0;
+        const overUploadSamples = upThreshold > 0 ? sentData.filter((d) => Number(d.value) >= upThreshold).length : 0;
+        const overDownloadSamples = downThreshold > 0 ? recvData.filter((d) => Number(d.value) >= downThreshold).length : 0;
+        if (overUploadSamples === 0 && overDownloadSamples === 0) return null;
+        const maxUpload = sentData.reduce((max, d) => Math.max(max, Number(d.value) || 0), 0);
+        const maxDownload = recvData.reduce((max, d) => Math.max(max, Number(d.value) || 0), 0);
+        console.log(
+          `[DIA Overusage] Interface ${interfaceName} (${customerName || "Unknown"}, CID: ${cid || "N/A"}, NBR: ${nbr || "N/A"}, Port: ${port || "N/A"}) ` +
+          `UP over-usage samples: ${overUploadSamples}/${sentData.length}, DOWN over-usage samples: ${overDownloadSamples}/${recvData.length}`
+        );
+        return {
+          customerName: customerName || "Unknown",
+          interfaceName,
+          upmbps: upmbps || null,
+          downmbps: downmbps || null,
+          maxUploadBps: maxUpload,
+          maxDownloadBps: maxDownload,
+          maxUpload: formatBps(maxUpload),
+          maxDownload: formatBps(maxDownload),
+          overUploadSamples,
+          overDownloadSamples,
+          totalUploadSamples: sentData.length,
+          totalDownloadSamples: recvData.length,
+          cid: cid || null,
+          nbr: nbr || null,
+          port: port || null,
+        };
+      };
 
-        let overUploadSamples = 0;
-        let overDownloadSamples = 0;
-
-        if (upThreshold > 0) {
-          overUploadSamples = sentData.filter((d) => Number(d.value) >= upThreshold).length;
-        }
-
-        if (downThreshold > 0) {
-          overDownloadSamples = recvData.filter((d) => Number(d.value) >= downThreshold).length;
-        }
-
-        if (overUploadSamples > 0 || overDownloadSamples > 0) {
-          customersWithOverusage += 1;
-
-          // Maximum values observed in the graph data
-          const maxUpload = sentData.reduce(
-            (max, d) => Math.max(max, Number(d.value) || 0),
-            0
-          );
-          const maxDownload = recvData.reduce(
-            (max, d) => Math.max(max, Number(d.value) || 0),
-            0
-          );
-
-          overusageResults.push({
-            customerName: customerName || "Unknown",
-            interfaceName,
-            upmbps: upmbps || null,
-            downmbps: downmbps || null,
-            // raw max values in bps
-            maxUploadBps: maxUpload,
-            maxDownloadBps: maxDownload,
-            // human-readable max values (bps / Kbps / Mbps / Gbps)
-            maxUpload: formatBps(maxUpload),
-            maxDownload: formatBps(maxDownload),
-            overUploadSamples,
-            overDownloadSamples,
-            totalUploadSamples: sentData.length,
-            totalDownloadSamples: recvData.length,
-            cid: cid || null,
-            nbr: nbr || null,
-            port: port || null,
-          });
-
-          console.log(
-            `[DIA Overusage] Interface ${interfaceName} (${customerName || "Unknown"}, CID: ${
-              cid || "N/A"
-            }, NBR: ${nbr || "N/A"}, Port: ${port || "N/A"}) ` +
-              `UP over-usage samples: ${overUploadSamples}/${sentData.length}, ` +
-              `DOWN over-usage samples: ${overDownloadSamples}/${recvData.length}`
-          );
+      for (let i = 0; i < diaCustomers.length; i += 5) {
+        const chunk = diaCustomers.slice(i, i + 5);
+        const chunkResults = await Promise.all(chunk.map(checkOverusage));
+        for (const result of chunkResults) {
+          if (result) {
+            customersWithOverusage += 1;
+            overusageResults.push(result);
+          }
         }
       }
 

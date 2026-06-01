@@ -11,7 +11,6 @@ const Terminal = ({ connection, onClose }) => {
   const fitAddon = new FitAddon();
   const terminalRef = useRef(null);
 
-
   useEffect(() => {
     if (!terminalRef.current) return;
 
@@ -36,11 +35,14 @@ const Terminal = ({ connection, onClose }) => {
     // Re-fit when window is resized
     window.addEventListener("resize", fitAddon.fit);
 
-    
-
     term.write("Hello from \x1B[1;3;31mxterm.js\x1B[0m $ ");
 
-    const socket = io(`${PRODUCTION_URL}`);
+
+    // 🚀 CRITICAL FIX: Force pure websocket mode for stable SSH streaming
+    const socket = io(`${PRODUCTION_URL}`, {
+      transports: ["websocket"],
+      upgrade: false
+    });
     socket.emit("connectDevice", connection);
 
     socket.on("output", (data) => term.write(data));

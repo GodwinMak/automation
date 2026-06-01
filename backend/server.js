@@ -79,18 +79,17 @@ app.use("/ftth-reports", ftthReportRoutes);
 app.use("/sms", smsRoutes);
 
 
-const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
 const { setUserSockets } = require("./emitNotificationToUser");
+// Only import cron job functions for manual triggers, do NOT schedule them here
+const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
 const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io);
 const { updateShared } = require("./cron/updateShared")(io);
 const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
-const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
-const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
-const { scheduleFTTHDailyCheck } = require("./cron/ftthDailyChecker");
-const {updateSwitchConfiguration} = require("./cron/switchConfiguration.js")(io);
-const {updateL3VPN} = require("./cron/updateL3VPN.js")(io);
-const {updateFTTHData} = require("./cron/updateFTTH.js")(io);
-
+const { updateSwitchConfiguration } = require("./cron/switchConfiguration.js")(io);
+const { updateL3VPN } = require("./cron/updateL3VPN.js")(io);
+const { updateFTTHData } = require("./cron/updateFTTH.js")(io);
+const { checkAdjacency } = require("./cron/isisAdjacent")(io);
+// Remove all schedule*Cron and auto-scheduling here; handled by PM2 forked workers
 // Socket for SSH
 
 // Map userId to a set of sockets
@@ -189,6 +188,8 @@ io.on("connection", (socket) => {
 
     await updateL3VPN();
     await updateFTTHData();
+
+    await checkAdjacency();
     // 🎯 Notify the client that the update is complete (to enable the button)
     io.emit("diaUpdateComplete"); 
   });
@@ -217,16 +218,35 @@ io.on("connection", (socket) => {
   });
 });
 
-require("./cron/uptimeTracker");
-// require("./cron/switchConfiguration.js")(io);
-require("./cron/isisAdjacent")(io);
-scheduleDiaOverusageCron();
-schedulePitchForUpgradeCron();
-scheduleFTTHDailyCheck();
 
-// Initialize status tracker cache
+// Only run these scheduled crons in the primary cluster process
+if (process.env.NODE_APP_INSTANCE === '0' || process.env.NODE_APP_INSTANCE === undefined) {
+  require("./cron/uptimeTracker");
+  require("./cron/isisAdjacent")(io);
+  const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
+  const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
+  const { scheduleFTTHDailyCheck } = require("./cron/ftthDailyChecker");
+  scheduleDiaOverusageCron();
+  schedulePitchForUpgradeCron();
+  scheduleFTTHDailyCheck();
+}
+
+// Initialize status tracker cache and log summary only in the primary cluster process
 const { initializeCache } = require("./utils/statusTracker");
-initializeCache(); 
+if (process.env.NODE_APP_INSTANCE === '0' || process.env.NODE_APP_INSTANCE === undefined) {
+  initializeCache().then((cache) => {
+    if (cache) {
+      console.log("[StatusTracker] Cache initialized:");
+      if (cache.DIA)    console.log(`  - DIA: ${cache.DIA.length} interfaces`);
+      if (cache.IPT)    console.log(`  - IPT: ${cache.IPT.length} interfaces`);
+      if (cache.SHARED) console.log(`  - SHARED: ${cache.SHARED.length} interfaces`);
+      if (cache.L3VPN)  console.log(`  - L3VPN: ${cache.L3VPN.length} interfaces`);
+      if (cache.FTTH)   console.log(`  - FTTH: ${cache.FTTH.length} interfaces`);
+    }
+  });
+} else {
+  initializeCache();
+}
 
 
 

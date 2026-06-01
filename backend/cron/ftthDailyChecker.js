@@ -197,22 +197,29 @@ const runFTTHDailyCheck = async () => {
     totalExpiredChecked = expiredCustomers.length;
     console.log(`[FTTH Checker] ${totalExpiredChecked} expired customer(s) to ping.`);
 
-    for (const customer of expiredCustomers) {
-      if (!customer.ip) continue;
-
-      const isAlive = await pingHost(customer.ip);
-      await customer.update({ lastPingedAt: new Date() });
-
-      if (isAlive) {
-        await customer.update({ isAliveWhileExpired: true });
-        newAliveRecords.push({
-          customerID: customer.customerID,
-          customerName: customer.customerName,
-          pppoeusername: customer.pppoeusername,
-          ip: customer.ip,
-          topUpExpiry: customer.topUpExpiry,
-        });
-        console.log(`[FTTH Checker] ALIVE while expired: ${customer.customerName || customer.ip}`);
+    // Ping up to 15 customers concurrently to avoid long sequential wait
+    const validCustomers = expiredCustomers.filter((c) => c.ip);
+    for (let i = 0; i < validCustomers.length; i += 15) {
+      const chunk = validCustomers.slice(i, i + 15);
+      const pingResults = await Promise.all(
+        chunk.map(async (customer) => {
+          const isAlive = await pingHost(customer.ip);
+          await customer.update({ lastPingedAt: new Date() });
+          return { customer, isAlive };
+        })
+      );
+      for (const { customer, isAlive } of pingResults) {
+        if (isAlive) {
+          await customer.update({ isAliveWhileExpired: true });
+          newAliveRecords.push({
+            customerID: customer.customerID,
+            customerName: customer.customerName,
+            pppoeusername: customer.pppoeusername,
+            ip: customer.ip,
+            topUpExpiry: customer.topUpExpiry,
+          });
+          console.log(`[FTTH Checker] ALIVE while expired: ${customer.customerName || customer.ip}`);
+        }
       }
     }
   } catch (err) {
