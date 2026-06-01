@@ -161,6 +161,7 @@ const RISK_COLORS = {
 };
 
 const PAGE_SIZE = 10;
+const EXCLUDE_FTTH = true;
 
 
 export default function ChurnAnalysis() {
@@ -197,21 +198,26 @@ export default function ChurnAnalysis() {
     setLoading(true);
     try {
       const typeParam = customerTypeFilter !== "all" ? `&customerType=${customerTypeFilter}` : "";
+      const excludeFtthParam = EXCLUDE_FTTH ? "?excludeFtth=1" : "";
 
       const [summaryRes, unstableRes, downtimeRes, changesRes, patternsRes] = await Promise.all([
         axios.get(`${PRODUCTION_URL}/churn-analysis/summary?days=${timeRange}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/unstable?days=${timeRange}&minChanges=3${typeParam}`),
         // Always fetch all types for downtime — split FTTH on the frontend
-        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime`),
+        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime${excludeFtthParam}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/changes?pageSize=50${typeParam}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/patterns?days=${timeRange}${typeParam}`),
       ]);
 
-      const allDowntime: ExtendedDowntime[] = downtimeRes.data.data || [];
+      const downtimeData = downtimeRes.data.data || {};
+      const nonFtthDowntime: ExtendedDowntime[] = downtimeData.nonFtth?.results || [];
+      const ftthOnlyDowntime: ExtendedDowntime[] = EXCLUDE_FTTH
+        ? []
+        : downtimeData.ftth?.results || [];
       setSummary(summaryRes.data);
       setUnstableCustomers(unstableRes.data.data || []);
-      setExtendedDowntime(allDowntime.filter((c) => c.customerType !== "FTTH"));
-      setFtthDowntime(allDowntime.filter((c) => c.customerType === "FTTH"));
+      setExtendedDowntime(nonFtthDowntime);
+      setFtthDowntime(ftthOnlyDowntime);
       setRecentChanges(changesRes.data.data || []);
       setPatterns(patternsRes.data);
     } catch (error) {
@@ -634,6 +640,10 @@ export default function ChurnAnalysis() {
     );
   };
 
+  const tabsClassName = EXCLUDE_FTTH
+    ? "grid w-full grid-cols-4 lg:w-[520px]"
+    : "grid w-full grid-cols-5 lg:w-[650px]";
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -716,11 +726,13 @@ export default function ChurnAnalysis() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5 lg:w-[650px]">
+        <TabsList className={tabsClassName}>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="unstable">At Risk</TabsTrigger>
           <TabsTrigger value="downtime">Extended Down</TabsTrigger>
-          <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
+          {!EXCLUDE_FTTH && (
+            <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
+          )}
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -1115,8 +1127,9 @@ export default function ChurnAnalysis() {
         </TabsContent>
 
         {/* FTTH Extended Downtime Tab */}
-        <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
-          <Card className="border-border/50">
+        {!EXCLUDE_FTTH && (
+          <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
+            <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Clock className="h-5 w-5 text-teal-400" />
@@ -1242,8 +1255,9 @@ export default function ChurnAnalysis() {
                 />
               </div>
             </CardContent>
-          </Card>
-        </TabsContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* History Tab */}
         <TabsContent value="history" className="space-y-6 mt-6">
