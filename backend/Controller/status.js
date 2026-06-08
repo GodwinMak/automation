@@ -11,72 +11,46 @@ const FTTHCustomer = db.ftthcustomers;
 // get count of devices available, DIA customers, IPT customers, Shared customers, and upgrades
 exports.getStatusCounts = async (req, res) => {
   try {
-    const deviceCount = await Device.count();
-    
-    // DIA Customer counts
-    const upDiaCustomerCount = await DiaCustomer.count({
-      where: { operationalStatus: "up" },
-    });
-    const downDiaCustomerCount = await DiaCustomer.count({
-      where: { operationalStatus: "down" },
-    });
-    
-    // IPT Customer counts
-    const upIptCustomerCount = await IptCustomer.count({
-      where: { operationalStatus: "up" },
-    });
-    const downIptCustomerCount = await IptCustomer.count({
-      where: { operationalStatus: "down" },
-    });
-
-    // Shared Customer counts
-    const upSharedCustomerCount = await SharedCustomer.count({
-      where: { operationalStatus: "up" },
-    });
-    const downSharedCustomerCount = await SharedCustomer.count({
-      where: { operationalStatus: "down" },
-    });
-
-    // L3VPN Customer counts
-    const upL3VPNCustomerCount = await L3VPNCustomer.count({
-      where: { operationalStatus: "up" },
-    });
-    const downL3VPNCustomerCount = await L3VPNCustomer.count({
-      where: { operationalStatus: "down" },
-    });
-
-    // FTTH Customer counts
-    const upFTTHCustomerCount = await FTTHCustomer.count({
-      where: { status: "up" },
-    });
-    const downFTTHCustomerCount = await FTTHCustomer.count({
-      where: { status: "down" },
-    });
-
-    // FTTH Expired / Active (not expired) counts
-    const expiredUpFTTHCount = await FTTHCustomer.count({
-      where: { isExpired: true, status: "up" },
-    });
-    const expiredDownFTTHCount = await FTTHCustomer.count({
-      where: { isExpired: true, status: "down" },
-    });
-    const activeUpFTTHCount = await FTTHCustomer.count({
-      where: { isExpired: false, status: "up" },
-    });
-    const activeDownFTTHCount = await FTTHCustomer.count({
-      where: { isExpired: false, status: "down" },
-    });
-    
-    // Upgrade counts
-    const temporaryUpgradesCount = await CustomerInfo.count({
-      where: { upgrade_type: "temporary" },
-    });
-    const permanentUpgradesCount = await CustomerInfo.count({
-      where: { upgrade_type: "permanent" },
-    });
-    const noUpgradesCount = await CustomerInfo.count({
-      where: { upgrade_type: null },
-    });
+    // Run all 18 independent COUNT queries in parallel
+    const [
+      deviceCount,
+      upDiaCustomerCount,
+      downDiaCustomerCount,
+      upIptCustomerCount,
+      downIptCustomerCount,
+      upSharedCustomerCount,
+      downSharedCustomerCount,
+      upL3VPNCustomerCount,
+      downL3VPNCustomerCount,
+      upFTTHCustomerCount,
+      downFTTHCustomerCount,
+      expiredUpFTTHCount,
+      expiredDownFTTHCount,
+      activeUpFTTHCount,
+      activeDownFTTHCount,
+      temporaryUpgradesCount,
+      permanentUpgradesCount,
+      noUpgradesCount,
+    ] = await Promise.all([
+      Device.count(),
+      DiaCustomer.count({ where: { operationalStatus: "up" } }),
+      DiaCustomer.count({ where: { operationalStatus: "down" } }),
+      IptCustomer.count({ where: { operationalStatus: "up" } }),
+      IptCustomer.count({ where: { operationalStatus: "down" } }),
+      SharedCustomer.count({ where: { operationalStatus: "up" } }),
+      SharedCustomer.count({ where: { operationalStatus: "down" } }),
+      L3VPNCustomer.count({ where: { operationalStatus: "up" } }),
+      L3VPNCustomer.count({ where: { operationalStatus: "down" } }),
+      FTTHCustomer.count({ where: { status: "up" } }),
+      FTTHCustomer.count({ where: { status: "down" } }),
+      FTTHCustomer.count({ where: { isExpired: true, status: "up" } }),
+      FTTHCustomer.count({ where: { isExpired: true, status: "down" } }),
+      FTTHCustomer.count({ where: { isExpired: false, status: "up" } }),
+      FTTHCustomer.count({ where: { isExpired: false, status: "down" } }),
+      CustomerInfo.count({ where: { upgrade_type: "temporary" } }),
+      CustomerInfo.count({ where: { upgrade_type: "permanent" } }),
+      CustomerInfo.count({ where: { upgrade_type: null } }),
+    ]);
 
     res.status(200).json({
       deviceCount,

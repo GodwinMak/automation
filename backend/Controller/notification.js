@@ -252,70 +252,100 @@ exports.checkAndNotify = async (req, res) => {
       }
     });
 
-    // Check current status for each customer
-    let notificationsCreated = 0;
+    if (customerMap.size === 0) {
+      return res.status(200).json({ message: "No watchlist customers to check", customersChecked: 0, notificationsCreated: 0 });
+    }
 
+    // Batch-load statuses for each customer type using IN queries (avoids N+1)
+    const diaIds = [], iptIds = [], sharedIds = [];
+    for (const [, customer] of customerMap) {
+      if (customer.customerType === "DIA") diaIds.push(customer.customerId);
+      else if (customer.customerType === "IPT") iptIds.push(customer.customerId);
+      else if (customer.customerType === "Shared") sharedIds.push(customer.customerId);
+    }
+
+    const [diaRows, iptRows, sharedRows] = await Promise.all([
+      diaIds.length
+        ? db.diacustomers.findAll({ where: { id: diaIds }, attributes: ["id", "operationalStatus"], raw: true })
+        : [],
+      iptIds.length
+        ? db.iptcustomers.findAll({ where: { id: iptIds }, attributes: ["id", "operationalStatus"], raw: true })
+        : [],
+      sharedIds.length
+        ? db.sharedcustomers.findAll({ where: { id: sharedIds }, attributes: ["id", "operationalStatus"], raw: true })
+        : [],
+    ]);
+
+    // Build status lookup map
+    const statusMap = new Map();
+    for (const r of diaRows) statusMap.set(`DIA-${r.id}`, r.operationalStatus);
+    for (const r of iptRows) statusMap.set(`IPT-${r.id}`, r.operationalStatus);
+    for (const r of sharedRows) statusMap.set(`Shared-${r.id}`, r.operationalStatus);
+
+    // Find customers that are currently down
+    const downCustomers = [];
     for (const [key, customer] of customerMap) {
-      let currentStatus = "unknown";
-      
-      // Get current status based on customer type
-      if (customer.customerType === "DIA") {
-        const diaCustomer = await db.diacustomers.findOne({
-          where: { id: customer.customerId },
-        });
-        currentStatus = diaCustomer?.operationalStatus || "unknown";
-      } else if (customer.customerType === "IPT") {
-        const iptCustomer = await db.iptcustomers.findOne({
-          where: { id: customer.customerId },
-        });
-        currentStatus = iptCustomer?.operationalStatus || "unknown";
-      } else if (customer.customerType === "Shared") {
-        const sharedCustomer = await db.sharedcustomers.findOne({
-          where: { id: customer.customerId },
-        });
-        currentStatus = sharedCustomer?.operationalStatus || "unknown";
-      }
-
-      // Check if we need to notify (status is down)
-      if (currentStatus === "down") {
-        // Check if we already sent a notification for this customer being down recently (within last hour)
-        const recentNotification = await Notification.findOne({
-          where: {
-            customerId: customer.customerId,
-            customerType: customer.customerType,
-            currentStatus: "down",
-            createdAt: {
-              [Op.gte]: new Date(Date.now() - 60 * 60 * 1000), // Last hour
-            },
-          },
-        });
-
-        if (!recentNotification) {
-          // Create notifications for all users watching this customer
-          const notifications = customer.userIds.map((userId) => ({
-            userId,
-            customerId: customer.customerId,
-            customerName: customer.customerName,
-            customerType: customer.customerType,
-            interface: customer.interface,
-            cid: customer.cid,
-            nbr: customer.nbr,
-            previousStatus: "up",
-            currentStatus: "down",
-            message: `🔴 ${customer.customerName} (${customer.customerType}) is DOWN. Interface: ${customer.interface}, CID: ${customer.cid || "N/A"}`,
-            notificationType: "status_change",
-          }));
-
-          await Notification.bulkCreate(notifications);
-          notificationsCreated += notifications.length;
-        }
+      const status = statusMap.get(key) || "unknown";
+      if (status === "down") {
+        downCustomers.push(customer);
       }
     }
 
+    if (downCustomers.length === 0) {
+      return res.status(200).json({
+        message: `Checked ${customerMap.size} customers, 0 are down`,
+        customersChecked: customerMap.size,
+        notificationsCreated: 0,
+      });
+    }
+
+    // Single query: find which customers already have a recent (last hour) down notification
+    const recentlySentIds = new Set();
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentNotifications = await Notification.findAll({
+      where: {
+        customerId: downCustomers.map((c) => c.customerId),
+        currentStatus: "down",
+        createdAt: { [Op.gte]: oneHourAgo },
+      },
+      attributes: ["customerId", "customerType"],
+      raw: true,
+    });
+    for (const n of recentNotifications) {
+      recentlySentIds.add(`${n.customerType}-${n.customerId}`);
+    }
+
+    // Build notification batch for customers not recently notified
+    const notifications = [];
+    for (const customer of downCustomers) {
+      const key = `${customer.customerType}-${customer.customerId}`;
+      if (recentlySentIds.has(key)) continue;
+
+      for (const userId of customer.userIds) {
+        notifications.push({
+          userId,
+          customerId: customer.customerId,
+          customerName: customer.customerName,
+          customerType: customer.customerType,
+          interface: customer.interface,
+          cid: customer.cid,
+          nbr: customer.nbr,
+          previousStatus: "up",
+          currentStatus: "down",
+          message: `🔴 ${customer.customerName} (${customer.customerType}) is DOWN. Interface: ${customer.interface}, CID: ${customer.cid || "N/A"}`,
+          notificationType: "status_change",
+        });
+      }
+    }
+
+    if (notifications.length > 0) {
+      await Notification.bulkCreate(notifications);
+    }
+
     res.status(200).json({
-      message: `Checked ${customerMap.size} customers, created ${notificationsCreated} notifications`,
+      message: `Checked ${customerMap.size} customers, created ${notifications.length} notifications`,
       customersChecked: customerMap.size,
-      notificationsCreated,
+      notificationsCreated: notifications.length,
     });
   } catch (error) {
     console.error("Error in checkAndNotify:", error);

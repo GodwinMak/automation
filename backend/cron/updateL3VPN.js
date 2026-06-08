@@ -6,7 +6,7 @@ const { trackStatusChanges, getL3vpnCustomerInfoMap } = require("../utils/status
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -666,7 +666,9 @@ module.exports = (io) => {
       "SELECT GET_LOCK('l3vpn_cron_update', 0) AS acquired"
     );
     if (!acquired) {
-      console.warn("[L3VPN] Another instance is already running — skipping this tick.");
+      if (process.env.LOG_LOCK_SKIPS === "1") {
+        console.warn("[L3VPN] Another instance is already running — skipping this tick.");
+      }
       return;
     }
     try {
@@ -678,9 +680,12 @@ module.exports = (io) => {
     }
   };
 
-  cron.schedule("*/5 * * * *", runAll);
-
-  return{
-    updateL3VPN,
+  if (options.schedule !== false) {
+    cron.schedule("3,8,13,18,23,28,33,38,43,48,53,58 * * * *", runAll);
+    console.log("[L3VPN] Sync cron job scheduled with 3-minute offset.");
   }
+
+  return {
+    updateL3VPN,
+  };
 };

@@ -5,7 +5,11 @@
 
 const db = require("../Models");
 const StatusChangeHistory = db.statusChangeHistories;
+const StatusChangeHistoryFtth = db.statusChangeHistoriesFtth;
+const { QueryTypes } = require("sequelize");
 const { createStatusChangeNotification } = require("../Controller/notification");
+const { emitNotificationToAll } = require("../emitNotificationToUser");
+const { publish: publishToRedis } = require("./ioPublisher");
 
 // In-memory cache to track last known status and timestamp per interface
 const statusCache = {
@@ -55,18 +59,29 @@ const shouldSkipTracking = (customerType) => {
  */
 const initializeCache = async () => {
   try {
-    // Get the most recent status change for each interface
-    const recentChanges = await StatusChangeHistory.findAll({
-      attributes: [
-        "interface",
-        "customerType",
-        "newStatus",
-        "changedAt",
-      ],
-      order: [["changedAt", "DESC"]],
-    });
+    const loadLatestRows = async (tableName) => {
+      return db.sequelize.query(
+        `SELECT s.interface, s.customerType, s.newStatus, s.changedAt
+         FROM ${tableName} s
+         INNER JOIN (
+           SELECT interface, customerType, MAX(changedAt) AS maxChangedAt
+           FROM ${tableName}
+           GROUP BY interface, customerType
+         ) latest
+           ON s.interface = latest.interface
+          AND s.customerType = latest.customerType
+          AND s.changedAt = latest.maxChangedAt`,
+        { type: QueryTypes.SELECT }
+      );
+    };
 
-    // Populate cache
+    const [mainChanges, ftthChanges] = await Promise.all([
+      loadLatestRows("statusChangeHistories"),
+      loadLatestRows("statusChangeHistories_ftth"),
+    ]);
+
+    const recentChanges = [...mainChanges, ...ftthChanges];
+
     for (const change of recentChanges) {
       const cache = statusCache[change.customerType];
       if (cache && !cache.has(change.interface)) {
@@ -169,13 +184,39 @@ const trackStatusChanges = async (interfaces, customerType, customerInfoMap = {}
   // Bulk insert changes
   if (changes.length > 0) {
     try {
-      await StatusChangeHistory.bulkCreate(changes);
+      const targetModel = customerType === "FTTH"
+        ? StatusChangeHistoryFtth
+        : StatusChangeHistory;
+      await targetModel.bulkCreate(changes);
       console.log(`[StatusTracker] Logged ${changes.length} status changes for ${customerType}`);
       
       // Trigger notifications for up -> down transitions
       for (const change of changes) {
         if (change.previousStatus === "up" && change.newStatus === "down") {
           try {
+            // Broadcast real-time link-down alert for monitoring UIs.
+            const realtimePayload = {
+              customerId: change.customerId,
+              customerName: change.customerName || "N/A",
+              customerType: change.customerType,
+              interface: change.interface,
+              cid: change.cid || "N/A",
+              nbr: change.nbr || "N/A",
+              previousStatus: change.previousStatus,
+              currentStatus: change.newStatus,
+              switchName: change.switchName || null,
+              notificationType: "status_change",
+              message: `🔴 ${change.customerName || "Customer"} (${change.customerType}) went DOWN. Interface: ${change.interface}, CID: ${change.cid || "N/A"}`,
+              timestamp: new Date().toISOString(),
+            };
+
+            const emittedCount = emitNotificationToAll(realtimePayload);
+            // If this process has no connected sockets (cron worker / fork),
+            // publish through Redis so the server cluster delivers it to clients.
+            if (emittedCount === 0) {
+              await publishToRedis("linkDownAlert", realtimePayload);
+            }
+
             const result = await createStatusChangeNotification({
               customerId: change.customerId,
               customerName: change.customerName,

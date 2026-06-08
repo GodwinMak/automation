@@ -10,7 +10,7 @@ const {
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -39,41 +39,7 @@ module.exports = (io) => {
     { name: "LTZ-AGG1-RAH", host: "41.175.37.5" },
     { name: "LTZ-AGG1-TIG", host: "41.175.37.6" },
   ];
-  // NEW: Function to handle sending notifications via Socket.IO
-  const sendDownNotification = async (interfaceData) => {
-    try {
-      const customerDetails = await customerinfo.findOne({
-        where: { interface: interfaceData.interface },
-        attributes: ["customerName", "cid"],
-      });
 
-      const notificationPayload = {
-        customerName: customerDetails?.customerName || "N/A",
-        cid: customerDetails?.cid || "N/A",
-        interface: interfaceData.interface,
-        switchName: interfaceData.switchName,
-        message: `Link for ${customerDetails?.customerName || "N/A"} (${
-          interfaceData.interface
-        }) went down.`,
-        timestamp: new Date().toISOString(),
-      };
-
-      // --- REAL-TIME NOTIFICATION ---
-      console.log("========================================");
-      console.log(
-        `🚀 Emitting 'linkDownAlert' to frontend for: ${notificationPayload.interface}`,
-      );
-      console.log("========================================");
-
-      // Use the 'io' object passed from server.js
-      io.emit("linkDownAlert", notificationPayload);
-    } catch (error) {
-      console.error(
-        `[Notification] Failed to process notification for ${interfaceData.interface}:`,
-        error.message,
-      );
-    }
-  };
   // === HELPER FUNCTIONS ===
   // Run command over SSH
   const runCommand = (host, cmd) => {
@@ -763,29 +729,6 @@ module.exports = (io) => {
 
       allInterfaces = finalInterfaces;
 
-      // === NOTIFICATION LOGIC ===
-      console.log(
-        "[DIA Updater] Checking for status changes for notifications...",
-      );
-      const previousStates = await diacustomer.findAll({
-        attributes: ["interface", "operationalStatus"],
-      });
-      const previousStateMap = new Map(
-        previousStates.map((item) => [item.interface, item.operationalStatus]),
-      );
-
-      for (const currentInterface of allInterfaces) {
-        const previousStatus = previousStateMap.get(currentInterface.interface);
-        const currentStatus = currentInterface.operationalStatus;
-        if (previousStatus === "up" && currentStatus === "down") {
-          console.log(
-            `[DIA Updater] STATUS CHANGE DETECTED: ${currentInterface.interface} went from UP to DOWN.`,
-          );
-          await sendDownNotification(currentInterface); // This now emits the socket event
-        }
-      }
-      // === END OF NOTIFICATION LOGIC ===
-
       // === STATUS CHANGE TRACKING ===
       console.log("[DIA Updater] Tracking status changes...");
       const customerInfoMap = await getDiaCustomerInfoMap();
@@ -968,7 +911,9 @@ module.exports = (io) => {
       "SELECT GET_LOCK('dia_cron_update', 0) AS acquired"
     );
     if (!acquired) {
-      console.warn("[DIA] Another instance is already running — skipping this tick.");
+      if (process.env.LOG_LOCK_SKIPS === "1") {
+        console.warn("[DIA] Another instance is already running — skipping this tick.");
+      }
       return;
     }
     try {
@@ -980,9 +925,10 @@ module.exports = (io) => {
       await db.sequelize.query("SELECT RELEASE_LOCK('dia_cron_update')");
     }
   };
-  cron.schedule("*/5 * * * *", runAll);
-  // Run immediately for testing
-  // runAll();
+  if (options.schedule !== false) {
+    cron.schedule("0,5,10,15,20,25,30,35,40,45,50,55 * * * *", runAll);
+    console.log("[DIA] Sync cron job scheduled with 0-minute offset.");
+  }
   return {
     updateDIA,
     updateAggDevices,

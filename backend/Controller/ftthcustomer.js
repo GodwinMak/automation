@@ -406,18 +406,19 @@ exports.uploadFTTHChurnReport = async (req, res) => {
     });
     const ftthCustomerMap = new Map(allFtthCustomers.map((c) => [c.customerID, c]));
 
-    // --- 3. Upsert valid rows into ftthcustomerinfo & sync ftthcustomer ---
+    // --- 3. Batch upsert valid rows into ftthcustomerinfo & collect sync data ---
+    const upsertRows = [];
     const expiredCustomers = [];
+    const syncUpdates = []; // { id, homeNumber, topUpExpiry, isExpired }
 
     for (const row of excelRows) {
       const ftthRecord = ftthCustomerMap.get(row.customerID);
       if (!ftthRecord) {
         stats.skippedNoCustomer++;
-        continue; // customerID not in ftthcustomer table — skip
+        continue;
       }
 
-      // Upsert into ftthcustomerinfo
-      const [, created] = await FTTHCustomerInfo.upsert({
+      upsertRows.push({
         customerID: row.customerID,
         customerName: row.customerName || null,
         emailAddress: row.emailAddress || null,
@@ -427,23 +428,49 @@ exports.uploadFTTHChurnReport = async (req, res) => {
       });
       stats.upserted++;
 
-      // Determine expiry flag (today's date is NOT expired)
       const isExpired = row.topUpExpiry ? row.topUpExpiry < startOfToday : false;
       if (isExpired) {
         expiredCustomers.push({ customerID: row.customerID, customerName: row.customerName });
         stats.expired++;
       }
 
-      // Sync fields back onto ftthcustomer
-      const updates = {
-        homeNumber: ftthRecord.homeNumber || row.homeNumber, // only fill if DB has no number
+      syncUpdates.push({
+        id: ftthRecord.id,
+        homeNumber: ftthRecord.homeNumber || row.homeNumber,
         topUpExpiry: row.topUpExpiry || ftthRecord.topUpExpiry,
         isExpired,
-        // Reset alive-while-expired flag when expiry date changes (re-evaluate on next ping)
-        ...(row.topUpExpiry && { isAliveWhileExpired: false }),
-      };
-      await ftthRecord.update(updates);
+        isAliveWhileExpired: row.topUpExpiry ? false : undefined,
+      });
     }
+
+    // Single bulk upsert into ftthcustomerinfo
+    if (upsertRows.length > 0) {
+      await FTTHCustomerInfo.bulkCreate(upsertRows, {
+        updateOnDuplicate: ["customerName", "emailAddress", "topUpExpiry", "homeNumber", "validityPeriod"],
+      });
+    }
+
+    // Batch update ftthcustomer records grouped by shared values to minimise queries
+    // Group by (isExpired, isAliveWhileExpired) to issue as few UPDATE statements as possible
+    const updateGroups = new Map();
+    for (const u of syncUpdates) {
+      // Build a key based on the boolean flags
+      const flagKey = `${u.isExpired}:${u.isAliveWhileExpired ?? "keep"}`;
+      if (!updateGroups.has(flagKey)) {
+        updateGroups.set(flagKey, { isExpired: u.isExpired, isAliveWhileExpired: u.isAliveWhileExpired, ids: [] });
+      }
+      updateGroups.get(flagKey).ids.push(u.id);
+    }
+    // Issue one UPDATE per distinct flag combination
+    await Promise.all(
+      Array.from(updateGroups.values()).map((group) => {
+        const updateFields = { isExpired: group.isExpired };
+        if (group.isAliveWhileExpired !== undefined) {
+          updateFields.isAliveWhileExpired = group.isAliveWhileExpired;
+        }
+        return FTTHCustomer.update(updateFields, { where: { id: group.ids } });
+      })
+    );
 
     // --- 4. Flag ftthcustomer records not present in ftthcustomerinfo ---
     const allInfoCustomerIDs = new Set(

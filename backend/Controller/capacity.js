@@ -18,161 +18,124 @@ exports.getCapacitySummary = async (req, res) => {
   const sortOrder = req.query.sortOrder || "desc";
 
   try {
-    // Get DIA capacity by NBR (total)
-    const diaCapacity = await CustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("customerinfo.downmbps")), "dia_capacity"],
-        [fn("COUNT", col("customerinfo.id")), "dia_customers"],
-      ],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get DIA UP capacity by NBR
-    const diaUpCapacity = await CustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("customerinfo.downmbps")), "capacity"],
-        [fn("COUNT", col("customerinfo.id")), "count"],
-      ],
-      include: [{
-        model: DiaCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get DIA DOWN capacity by NBR
-    const diaDownCapacity = await CustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("customerinfo.downmbps")), "capacity"],
-        [fn("COUNT", col("customerinfo.id")), "count"],
-      ],
-      include: [{
-        model: DiaCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get IPT capacity by NBR (total)
-    const iptCapacity = await IptCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("iptcustomerinfo.downmbps")), "ipt_capacity"],
-        [fn("COUNT", col("iptcustomerinfo.id")), "ipt_customers"],
-      ],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get IPT UP capacity by NBR
-    const iptUpCapacity = await IptCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
-        [fn("COUNT", col("iptcustomerinfo.id")), "count"],
-      ],
-      include: [{
-        model: IptCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get IPT DOWN capacity by NBR
-    const iptDownCapacity = await IptCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
-        [fn("COUNT", col("iptcustomerinfo.id")), "count"],
-      ],
-      include: [{
-        model: IptCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get Shared capacity by NBR (total)
-    const sharedCapacity = await SharedCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("sharedcustomerinfo.capacity")), "shared_capacity"],
-        [fn("COUNT", col("sharedcustomerinfo.id")), "shared_customers"],
-      ],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get Shared UP capacity by NBR
-    const sharedUpCapacity = await SharedCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
-        [fn("COUNT", col("sharedcustomerinfo.id")), "count"],
-      ],
-      include: [{
-        model: SharedCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
-
-    // Get Shared DOWN capacity by NBR
-    const sharedDownCapacity = await SharedCustomerInfo.findAll({
-      attributes: [
-        "nbr",
-        [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
-        [fn("COUNT", col("sharedcustomerinfo.id")), "count"],
-      ],
-      include: [{
-        model: SharedCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      where: {
-        nbr: { [Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
+    // Run all 9 capacity queries in parallel
+    const [
+      diaCapacity,
+      diaUpCapacity,
+      diaDownCapacity,
+      iptCapacity,
+      iptUpCapacity,
+      iptDownCapacity,
+      sharedCapacity,
+      sharedUpCapacity,
+      sharedDownCapacity,
+    ] = await Promise.all([
+      // DIA capacity by NBR (total)
+      CustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("customerinfo.downmbps")), "dia_capacity"],
+          [fn("COUNT", col("customerinfo.id")), "dia_customers"],
+        ],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // DIA UP capacity by NBR
+      CustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("customerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("customerinfo.id")), "count"],
+        ],
+        include: [{ model: DiaCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // DIA DOWN capacity by NBR
+      CustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("customerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("customerinfo.id")), "count"],
+        ],
+        include: [{ model: DiaCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // IPT capacity by NBR (total)
+      IptCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("iptcustomerinfo.downmbps")), "ipt_capacity"],
+          [fn("COUNT", col("iptcustomerinfo.id")), "ipt_customers"],
+        ],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // IPT UP capacity by NBR
+      IptCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("iptcustomerinfo.id")), "count"],
+        ],
+        include: [{ model: IptCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // IPT DOWN capacity by NBR
+      IptCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("iptcustomerinfo.id")), "count"],
+        ],
+        include: [{ model: IptCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // Shared capacity by NBR (total)
+      SharedCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("sharedcustomerinfo.capacity")), "shared_capacity"],
+          [fn("COUNT", col("sharedcustomerinfo.id")), "shared_customers"],
+        ],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // Shared UP capacity by NBR
+      SharedCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
+          [fn("COUNT", col("sharedcustomerinfo.id")), "count"],
+        ],
+        include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // Shared DOWN capacity by NBR
+      SharedCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
+          [fn("COUNT", col("sharedcustomerinfo.id")), "count"],
+        ],
+        include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+    ]);
 
     // Create lookup maps for UP/DOWN data
     const diaUpMap = new Map(diaUpCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
@@ -353,138 +316,98 @@ exports.getCapacitySummary = async (req, res) => {
 // Get overall capacity stats
 exports.getCapacityStats = async (req, res) => {
   try {
-    // DIA totals - capacity from CustomerInfo
-    const diaStats = await CustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("downmbps")), "total_capacity"],
-        [fn("COUNT", col("id")), "total_customers"],
-      ],
-      raw: true,
-    });
-
-    // DIA UP/DOWN counts - from DiaCustomer table directly (same as Dashboard)
-    const diaUpCount = await DiaCustomer.count({ where: { operationalStatus: "up" } });
-    const diaDownCount = await DiaCustomer.count({ where: { operationalStatus: "down" } });
-
-    // DIA UP capacity
-    const diaUpStats = await CustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("customerinfo.downmbps")), "capacity"],
-      ],
-      include: [{
-        model: DiaCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      raw: true,
-    });
-
-    // DIA DOWN capacity
-    const diaDownStats = await CustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("customerinfo.downmbps")), "capacity"],
-      ],
-      include: [{
-        model: DiaCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      raw: true,
-    });
-
-    // IPT totals - capacity from IptCustomerInfo
-    const iptStats = await IptCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("downmbps")), "total_capacity"],
-        [fn("COUNT", col("id")), "total_customers"],
-      ],
-      raw: true,
-    });
-
-    // IPT UP/DOWN counts - from IptCustomer table directly (same as Dashboard)
-    const iptUpCount = await IptCustomer.count({ where: { operationalStatus: "up" } });
-    const iptDownCount = await IptCustomer.count({ where: { operationalStatus: "down" } });
-
-    // IPT UP capacity
-    const iptUpStats = await IptCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
-      ],
-      include: [{
-        model: IptCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      raw: true,
-    });
-
-    // IPT DOWN capacity
-    const iptDownStats = await IptCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"],
-      ],
-      include: [{
-        model: IptCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      raw: true,
-    });
-
-    // Shared totals - capacity from SharedCustomerInfo
-    const sharedStats = await SharedCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("capacity")), "total_capacity"],
-        [fn("COUNT", col("id")), "total_customers"],
-      ],
-      raw: true,
-    });
-
-    // Shared UP/DOWN counts - from SharedCustomer table directly (same as Dashboard)
-    const sharedUpCount = await SharedCustomer.count({ where: { operationalStatus: "up" } });
-    const sharedDownCount = await SharedCustomer.count({ where: { operationalStatus: "down" } });
-
-    // Shared UP capacity
-    const sharedUpStats = await SharedCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
-      ],
-      include: [{
-        model: SharedCustomer,
-        attributes: [],
-        where: { operationalStatus: "up" },
-      }],
-      raw: true,
-    });
-
-    // Shared DOWN capacity
-    const sharedDownStats = await SharedCustomerInfo.findOne({
-      attributes: [
-        [fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"],
-      ],
-      include: [{
-        model: SharedCustomer,
-        attributes: [],
-        where: { operationalStatus: "down" },
-      }],
-      raw: true,
-    });
-
-    // Count unique switches
-    const uniqueSwitches = await CustomerInfo.count({
-      distinct: true,
-      col: "nbr",
-    });
-
-    const iptSwitches = await IptCustomerInfo.count({
-      distinct: true,
-      col: "nbr",
-    });
-
-    const sharedSwitches = await SharedCustomerInfo.count({
-      distinct: true,
-      col: "nbr",
-    });
+    // Run all 15 independent stat queries in parallel
+    const [
+      diaStats,
+      diaUpCount,
+      diaDownCount,
+      diaUpStats,
+      diaDownStats,
+      iptStats,
+      iptUpCount,
+      iptDownCount,
+      iptUpStats,
+      iptDownStats,
+      sharedStats,
+      sharedUpCount,
+      sharedDownCount,
+      sharedUpStats,
+      sharedDownStats,
+      uniqueSwitches,
+      iptSwitches,
+      sharedSwitches,
+    ] = await Promise.all([
+      // DIA totals
+      CustomerInfo.findOne({
+        attributes: [
+          [fn("SUM", col("downmbps")), "total_capacity"],
+          [fn("COUNT", col("id")), "total_customers"],
+        ],
+        raw: true,
+      }),
+      DiaCustomer.count({ where: { operationalStatus: "up" } }),
+      DiaCustomer.count({ where: { operationalStatus: "down" } }),
+      // DIA UP capacity
+      CustomerInfo.findOne({
+        attributes: [[fn("SUM", col("customerinfo.downmbps")), "capacity"]],
+        include: [{ model: DiaCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        raw: true,
+      }),
+      // DIA DOWN capacity
+      CustomerInfo.findOne({
+        attributes: [[fn("SUM", col("customerinfo.downmbps")), "capacity"]],
+        include: [{ model: DiaCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        raw: true,
+      }),
+      // IPT totals
+      IptCustomerInfo.findOne({
+        attributes: [
+          [fn("SUM", col("downmbps")), "total_capacity"],
+          [fn("COUNT", col("id")), "total_customers"],
+        ],
+        raw: true,
+      }),
+      IptCustomer.count({ where: { operationalStatus: "up" } }),
+      IptCustomer.count({ where: { operationalStatus: "down" } }),
+      // IPT UP capacity
+      IptCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"]],
+        include: [{ model: IptCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        raw: true,
+      }),
+      // IPT DOWN capacity
+      IptCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("iptcustomerinfo.downmbps")), "capacity"]],
+        include: [{ model: IptCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        raw: true,
+      }),
+      // Shared totals
+      SharedCustomerInfo.findOne({
+        attributes: [
+          [fn("SUM", col("capacity")), "total_capacity"],
+          [fn("COUNT", col("id")), "total_customers"],
+        ],
+        raw: true,
+      }),
+      SharedCustomer.count({ where: { operationalStatus: "up" } }),
+      SharedCustomer.count({ where: { operationalStatus: "down" } }),
+      // Shared UP capacity
+      SharedCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"]],
+        include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        raw: true,
+      }),
+      // Shared DOWN capacity
+      SharedCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("sharedcustomerinfo.capacity")), "capacity"]],
+        include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        raw: true,
+      }),
+      // Unique switch counts
+      CustomerInfo.count({ distinct: true, col: "nbr" }),
+      IptCustomerInfo.count({ distinct: true, col: "nbr" }),
+      SharedCustomerInfo.count({ distinct: true, col: "nbr" }),
+    ]);
 
     // Calculate capacity totals
     const diaUpCapacity = parseInt(diaUpStats?.capacity) || 0;

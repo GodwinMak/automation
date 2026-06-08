@@ -6,7 +6,7 @@ const { trackStatusChanges, getSharedCustomerInfoMap } = require("../utils/statu
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -335,7 +335,9 @@ module.exports = (io) => {
       "SELECT GET_LOCK('shared_cron_update', 0) AS acquired"
     );
     if (!acquired) {
-      console.warn("[Shared] Another instance is already running — skipping this tick.");
+      if (process.env.LOG_LOCK_SKIPS === "1") {
+        console.warn("[Shared] Another instance is already running — skipping this tick.");
+      }
       return;
     }
     try {
@@ -346,9 +348,10 @@ module.exports = (io) => {
       await db.sequelize.query("SELECT RELEASE_LOCK('shared_cron_update')");
     }
   };
-  cron.schedule("*/5 * * * *", runAll);
-  // Run immediately for testing
-  // runAll();
+  if (options.schedule !== false) {
+    cron.schedule("2,7,12,17,22,27,32,37,42,47,52,57 * * * *", runAll);
+    console.log("[Shared] Sync cron job scheduled with 2-minute offset.");
+  }
 
   return {  
     updateShared,

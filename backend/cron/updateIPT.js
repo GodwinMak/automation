@@ -6,7 +6,7 @@ const { trackStatusChanges, getIptCustomerInfoMap } = require("../utils/statusTr
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -940,7 +940,9 @@ module.exports = (io) => {
       "SELECT GET_LOCK('ipt_cron_update', 0) AS acquired"
     );
     if (!acquired) {
-      console.warn("[IPT] Another instance is already running — skipping this tick.");
+      if (process.env.LOG_LOCK_SKIPS === "1") {
+        console.warn("[IPT] Another instance is already running — skipping this tick.");
+      }
       return;
     }
     try {
@@ -952,9 +954,10 @@ module.exports = (io) => {
       await db.sequelize.query("SELECT RELEASE_LOCK('ipt_cron_update')");
     }
   };
-  cron.schedule("*/5 * * * *", runAll);
-  // Run immediately for testing
-  // runAll();
+  if (options.schedule !== false) {
+    cron.schedule("1,6,11,16,21,26,31,36,41,46,51,56 * * * *", runAll);
+    console.log("[IPT] Sync cron job scheduled with 1-minute offset.");
+  }
 
   return {
     updateIPT,

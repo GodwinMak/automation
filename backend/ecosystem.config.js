@@ -1,15 +1,14 @@
 module.exports = {
   apps: [
-    // 🌐 WEB APPLICATION LAYER (Multi-Core Cluster)
+    // 🌐 WEB APPLICATION LAYER (cluster — Redis adapter keeps sockets in sync across instances)
     {
       name: "automation-server",
       script: "/home/automation/backend/server.js",
       instances: "max",
       exec_mode: "cluster",
       max_memory_restart: "2G",
-      env: {
-        NODE_OPTIONS: "--max-old-space-size=2048"
-      }
+      node_args: "--max-old-space-size=2048",
+      env_file: ".env"
     },
     // ⚙️ ISOLATED BACKGROUND CRON PROCESSES (Single-Instance Fork Mode)
     {
@@ -19,7 +18,9 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
-      max_memory_restart: "2G"
+      max_memory_restart: "2G",
+      node_args: "--max-old-space-size=2048",
+      env_file: ".env"
     },
     {
       name: "cron-worker-ipt",
@@ -28,7 +29,9 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
-      max_memory_restart: "2G"
+      max_memory_restart: "2G",
+      node_args: "--max-old-space-size=2048",
+      env_file: ".env"
     },
     {
       name: "cron-worker-shared",
@@ -37,7 +40,9 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
-      max_memory_restart: "2G"
+      max_memory_restart: "2G",
+      node_args: "--max-old-space-size=2048",
+      env_file: ".env"
     },
     {
       name: "cron-worker-l3vpn",
@@ -46,7 +51,9 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
-      max_memory_restart: "2G"
+      max_memory_restart: "2G",
+      node_args: "--max-old-space-size=2048",
+      env_file: ".env"
     },
     {
       name: "cron-worker-ftth",
@@ -56,18 +63,28 @@ module.exports = {
       exec_mode: "fork",
       autorestart: true,
       max_memory_restart: "3G", // BNG routing lists are large; give it extra room
-      env: {
-        NODE_OPTIONS: "--max-old-space-size=3072"
-      }
+      node_args: "--max-old-space-size=3072",
+      env_file: ".env"
     },
-   {
-      name: "cron-worker-isis",
-      script: "./cron-runner.js",
-      args: "ISIS",
+    {
+      name: "cron-worker-upgrade",
+      script: "./cron/upgradeWorker.js",
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
-      max_memory_restart: "2G"
-    }
+      max_memory_restart: "512M",
+      env_file: ".env"
+    },
+    {
+      name: "diagnosis-worker",
+      script: "./cron-runner.js",
+      args: "Diagnosis",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_memory_restart: "1G",
+      node_args: "--max-old-space-size=1024",
+      env_file: ".env"
+    },
   ]
 };

@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -161,7 +162,6 @@ const RISK_COLORS = {
 };
 
 const PAGE_SIZE = 10;
-const EXCLUDE_FTTH = true;
 
 
 export default function ChurnAnalysis() {
@@ -174,6 +174,9 @@ export default function ChurnAnalysis() {
   const [timeRange, setTimeRange] = useState("30");
   const [customerTypeFilter, setCustomerTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [includeFtth, setIncludeFtth] = useState(
+    () => localStorage.getItem("churn_includeFtth") === "1"
+  );
 
   // Pagination states
   const [atRiskPage, setAtRiskPage] = useState(1);
@@ -198,7 +201,7 @@ export default function ChurnAnalysis() {
     setLoading(true);
     try {
       const typeParam = customerTypeFilter !== "all" ? `&customerType=${customerTypeFilter}` : "";
-      const excludeFtthParam = EXCLUDE_FTTH ? "?excludeFtth=1" : "";
+      const excludeFtthParam = includeFtth ? "" : "?excludeFtth=1";
 
       const [summaryRes, unstableRes, downtimeRes, changesRes, patternsRes] = await Promise.all([
         axios.get(`${PRODUCTION_URL}/churn-analysis/summary?days=${timeRange}`),
@@ -211,9 +214,9 @@ export default function ChurnAnalysis() {
 
       const downtimeData = downtimeRes.data.data || {};
       const nonFtthDowntime: ExtendedDowntime[] = downtimeData.nonFtth?.results || [];
-      const ftthOnlyDowntime: ExtendedDowntime[] = EXCLUDE_FTTH
-        ? []
-        : downtimeData.ftth?.results || [];
+      const ftthOnlyDowntime: ExtendedDowntime[] = includeFtth
+        ? downtimeData.ftth?.results || []
+        : [];
       setSummary(summaryRes.data);
       setUnstableCustomers(unstableRes.data.data || []);
       setExtendedDowntime(nonFtthDowntime);
@@ -232,7 +235,7 @@ export default function ChurnAnalysis() {
   // Fetch data on mount and when timeRange or customerTypeFilter changes
   useEffect(() => {
     fetchData();
-  }, [timeRange, customerTypeFilter]);
+  }, [timeRange, customerTypeFilter, includeFtth]);
 
   // Auto-reload every 2 minutes
   useEffect(() => {
@@ -240,7 +243,7 @@ export default function ChurnAnalysis() {
       fetchData();
     }, 120000); // 2 minutes
     return () => clearInterval(interval);
-  }, [timeRange, customerTypeFilter, activeTab, riskFilter]);
+  }, [timeRange, customerTypeFilter, includeFtth, activeTab, riskFilter]);
 
   // Persist activeTab and riskFilter in localStorage
   useEffect(() => {
@@ -253,6 +256,13 @@ export default function ChurnAnalysis() {
       localStorage.removeItem("churn_riskFilter");
     }
   }, [riskFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("churn_includeFtth", includeFtth ? "1" : "0");
+    if (!includeFtth && activeTab === "ftth-downtime") {
+      setActiveTab("downtime");
+    }
+  }, [includeFtth, activeTab]);
 
   // Navigate to customer view
   const handleViewCustomer = (customer: any) => {
@@ -640,9 +650,9 @@ export default function ChurnAnalysis() {
     );
   };
 
-  const tabsClassName = EXCLUDE_FTTH
-    ? "grid w-full grid-cols-4 lg:w-[520px]"
-    : "grid w-full grid-cols-5 lg:w-[650px]";
+  const tabsClassName = includeFtth
+    ? "grid w-full grid-cols-5 lg:w-[650px]"
+    : "grid w-full grid-cols-4 lg:w-[520px]";
 
   return (
     <div className="p-6 space-y-6">
@@ -688,6 +698,11 @@ export default function ChurnAnalysis() {
             </SelectContent>
           </Select>
 
+          <div className="flex items-center gap-2 rounded-md border border-border/50 px-3 py-2">
+            <Switch checked={includeFtth} onCheckedChange={setIncludeFtth} />
+            <span className="text-xs text-muted-foreground">Include FTTH</span>
+          </div>
+
           {/* Global search across churn data */}
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -730,7 +745,7 @@ export default function ChurnAnalysis() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="unstable">At Risk</TabsTrigger>
           <TabsTrigger value="downtime">Extended Down</TabsTrigger>
-          {!EXCLUDE_FTTH && (
+          {includeFtth && (
             <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
           )}
           <TabsTrigger value="history">History</TabsTrigger>
@@ -1127,7 +1142,7 @@ export default function ChurnAnalysis() {
         </TabsContent>
 
         {/* FTTH Extended Downtime Tab */}
-        {!EXCLUDE_FTTH && (
+        {includeFtth && (
           <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
             <Card className="border-border/50">
             <CardHeader>

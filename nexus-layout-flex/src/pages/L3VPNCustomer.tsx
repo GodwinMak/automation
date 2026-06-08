@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { ReusableTable } from "@/components/Table";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Eye } from "lucide-react";
+import { Eye, Download } from "lucide-react";
 import { PRODUCTION_URL } from "@/utils/Api";
 import {
   Select,
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useNavigate, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 const L3VPNCustomer = () => {
   const navigate = useNavigate();
@@ -33,6 +34,40 @@ const L3VPNCustomer = () => {
       ? locationState.filterType
       : "all";
   const [statusFilter, setStatusFilter] = useState(initialFilter);
+
+  const handleExport = async () => {
+    try {
+      const params = new URLSearchParams({
+        status: statusFilter,
+        nbr: nbrSearch,
+        search: search,
+      });
+
+      const response = await axios.get(
+        `${PRODUCTION_URL}/export/l3vpn?${params}`,
+        { responseType: "blob" }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+
+      const timestamp = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/:/g, "-");
+      const filename = `l3vpn_customers_${statusFilter || "all"}_${timestamp}.xlsx`;
+
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Export failed:", error);
+      alert("Export failed. Please try again.");
+    }
+  };
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -132,6 +167,15 @@ const L3VPNCustomer = () => {
         }
         headerActions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              className="flex items-center gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
             <input
               type="text"
               placeholder="Search customer..."

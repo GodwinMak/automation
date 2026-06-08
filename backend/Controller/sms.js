@@ -43,14 +43,18 @@ const normalizePhone = (n) => {
 
 /**
  * POST /sms/send
- * Body: { customerType: "ftth"|..., message: string, extraNumbers?: string[], specificNumbers?: string[] }
- * If specificNumbers is provided the DB lookup is skipped and only those numbers are used.
+ * Body: { sendMode: "specific"|"all", customerType?: "ftth"|..., message: string, extraNumbers?: string[], specificNumbers?: string[] }
+ * sendMode controls whether the DB lookup is used.
  */
 exports.sendBulkSms = async (req, res) => {
-  const { customerType, message, extraNumbers, specificNumbers } = req.body;
+  const { sendMode, customerType, message, extraNumbers, specificNumbers } = req.body;
 
   if (!message || !message.trim()) {
     return res.status(400).json({ error: "message is required." });
+  }
+
+  if (!sendMode || (sendMode !== "specific" && sendMode !== "all")) {
+    return res.status(400).json({ error: "sendMode must be 'specific' or 'all'." });
   }
 
   const manualNumbers = Array.isArray(extraNumbers)
@@ -63,19 +67,25 @@ exports.sendBulkSms = async (req, res) => {
 
     const hasSpecific = Array.isArray(specificNumbers) && specificNumbers.length > 0;
 
-    if (hasSpecific) {
-      // Frontend passed an explicit selection — skip the DB lookup
-      phoneNumbers = specificNumbers.map(normalizePhone).filter(Boolean);
+    if (sendMode === "specific") {
+      if (!hasSpecific && manualNumbers.length === 0) {
+        return res.status(400).json({ error: "specificNumbers or extraNumbers is required when sendMode is 'specific'." });
+      }
+      // Explicit selection — skip the DB lookup
+      phoneNumbers = hasSpecific
+        ? specificNumbers.map(normalizePhone).filter(Boolean)
+        : [];
       customerCount = phoneNumbers.length;
-    } else if (customerType === "ftth") {
+    } else if (sendMode === "all") {
+      if (customerType !== "ftth") {
+        return res.status(400).json({ error: "customerType is required when sendMode is 'all'." });
+      }
       const customers = await db.ftthcustomers.findAll({
         attributes: ["customerID", "customerName", "homeNumber"],
         where: { homeNumber: { [db.Sequelize.Op.ne]: null } },
       });
       phoneNumbers = customers.map((c) => c.homeNumber && normalizePhone(c.homeNumber)).filter(Boolean);
       customerCount = customers.length;
-    } else {
-      return res.status(400).json({ error: `customerType or specificNumbers is required.` });
     }
 
     const allNumbers = [...new Set([...phoneNumbers, ...manualNumbers])];

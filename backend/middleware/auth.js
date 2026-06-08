@@ -64,7 +64,7 @@ const ROLE_PERMISSIONS = {
     // restricted server-side to their own watchlist.
     canViewChurnAnalysis: true,
     canView95thReport: false,
-    canDiagnoseCustomer: false,
+    canDiagnoseCustomer: true,
   },
 };
 

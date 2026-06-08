@@ -47,6 +47,7 @@ db.client_dbs = require("./client_db")(sequelize, DataTypes);
 db.favorites = require("./favorite.js")(sequelize, DataTypes);
 db.uptimehistories = require("./uptimeHistory.js")(sequelize, DataTypes);
 db.statusChangeHistories = require("./statusChangeHistory.js")(sequelize, DataTypes);
+db.statusChangeHistoriesFtth = require("./statusChangeHistoryFtth.js")(sequelize, DataTypes);
 db.percentileReports = require("./percentileReport.js")(sequelize, DataTypes);
 db.notifications = require("./notification.js")(sequelize, DataTypes);
 db.diaOverusageReports = require("./diaOverusageReport.js")(sequelize, DataTypes);

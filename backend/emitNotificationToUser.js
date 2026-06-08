@@ -1,4 +1,4 @@
-// Helper to emit a notification to a specific user (used by notification controller)
+// Helper to emit notifications through connected Socket.IO clients
 let userSockets = null;
 
 function setUserSockets(map) {
@@ -6,13 +6,29 @@ function setUserSockets(map) {
 }
 
 function emitNotificationToUser(userId, notification) {
-  if (!userSockets) return;
+  if (!userSockets) return 0;
   const sockets = userSockets.get(userId);
-  if (sockets) {
-    for (const sock of sockets) {
-      sock.emit("linkDownAlert", notification);
-    }
+  if (!sockets) return 0;
+
+  let emitted = 0;
+  for (const sock of sockets) {
+    sock.emit("linkDownAlert", notification);
+    emitted += 1;
   }
+  return emitted;
 }
 
-module.exports = { emitNotificationToUser, setUserSockets };
+function emitNotificationToAll(notification) {
+  if (!userSockets) return 0;
+
+  let emitted = 0;
+  for (const sockets of userSockets.values()) {
+    for (const sock of sockets) {
+      sock.emit("linkDownAlert", notification);
+      emitted += 1;
+    }
+  }
+  return emitted;
+}
+
+module.exports = { emitNotificationToUser, emitNotificationToAll, setUserSockets };

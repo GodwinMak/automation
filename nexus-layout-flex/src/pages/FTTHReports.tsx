@@ -30,12 +30,20 @@ interface ReportCustomers {
   notInChurnReport: Record<string, string>[];
 }
 
+interface ReportSummary {
+  totalReports: number;
+  uniqueAliveWhileExpired: number;
+  uniqueNotInChurnReport: number;
+  avgExpiredChecked: number;
+}
+
 type ActiveTab = "alive" | "notInInfo";
 
 const FTTHReports = () => {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
 
   // View modal state
   const [viewReport, setViewReport] = useState<Report | null>(null);
@@ -46,8 +54,12 @@ const FTTHReports = () => {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const res = await axios.get(`${PRODUCTION_URL}/ftth-reports`, { withCredentials: true });
-        setReports(res.data.reports || []);
+        const [reportsRes, summaryRes] = await Promise.all([
+          axios.get(`${PRODUCTION_URL}/ftth-reports`, { withCredentials: true }),
+          axios.get(`${PRODUCTION_URL}/ftth-reports/summary`, { withCredentials: true }),
+        ]);
+        setReports(reportsRes.data.reports || []);
+        setSummary(summaryRes.data || null);
       } catch (err) {
         console.error("Failed to fetch FTTH reports:", err);
       } finally {
@@ -110,17 +122,18 @@ const FTTHReports = () => {
       "Not in Churn Report": r.notInInfoCount,
     }));
 
-  const totalAlive = reports.reduce((s, r) => s + r.aliveWhileExpiredCount, 0);
-  const totalNotInInfo = reports.reduce((s, r) => s + r.notInInfoCount, 0);
-  const avgExpiredChecked =
+  const totalAlive = summary?.uniqueAliveWhileExpired ?? reports.reduce((s, r) => s + r.aliveWhileExpiredCount, 0);
+  const totalNotInInfo = summary?.uniqueNotInChurnReport ?? reports.reduce((s, r) => s + r.notInInfoCount, 0);
+  const avgExpiredChecked = summary?.avgExpiredChecked ?? (
     reports.length > 0
       ? Math.round(reports.reduce((s, r) => s + r.totalExpiredChecked, 0) / reports.length)
-      : 0;
+      : 0
+  );
 
   const statCards = [
     {
       label: "Reports Available",
-      value: reports.length,
+      value: summary?.totalReports ?? reports.length,
       icon: <FileText className="h-5 w-5 text-blue-500" />,
       color: "text-blue-600 dark:text-blue-400",
     },

@@ -5,7 +5,7 @@ const { Op } = require("sequelize");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -333,14 +333,10 @@ module.exports = (io) => {
     console.log(`[Stale Customer Cleanup] Finished at ${new Date().toISOString()}\n`);
   };
 
-  // Schedule cleanup to run daily at 2 AM
-  cron.schedule("0 2 * * *", cleanupStaleCustomers);
-
-  console.log("[Stale Customer Cleanup] Cron job scheduled to run daily at 2:00 AM");
-
-  // === TEST EXECUTION ===
-  // Uncomment the line below to run cleanup immediately for testing
-  // cleanupStaleCustomers();
+  if (options.schedule !== false) {
+    cron.schedule("0 2 * * *", cleanupStaleCustomers);
+    console.log("[Stale Customer Cleanup] Cron job scheduled to run daily at 2:00 AM");
+  }
 
   return {
     cleanupStaleCustomers

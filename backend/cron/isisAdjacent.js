@@ -17,7 +17,7 @@ const toEATString = (date) => {
   return eatDate.toLocaleString("en-GB", { hour12: false });
 };
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -126,7 +126,9 @@ module.exports = (io) => {
       "SELECT GET_LOCK('isis_adjacent_cron', 0) AS acquired"
     );
     if (!acquired) {
-      console.warn("[ISIS] Another instance is already running — skipping this tick.");
+      if (process.env.LOG_LOCK_SKIPS === "1") {
+        console.warn("[ISIS] Another instance is already running — skipping this tick.");
+      }
       return;
     }
     try {
@@ -310,9 +312,11 @@ module.exports = (io) => {
     }
   };
 
-  cron.schedule("*/2 * * * *", () => {
-    checkAdjacency().catch(console.error);
-  });
+  if (options.schedule !== false) {
+    cron.schedule("*/2 * * * *", () => {
+      checkAdjacency().catch(console.error);
+    });
+  }
 
   return { checkAdjacency };
 };

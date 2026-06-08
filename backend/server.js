@@ -22,6 +22,59 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: (origin, cb) => cb(null, origin || true), credentials: true } });
 
+// Redis adapter — lets every cluster instance share the same Socket.IO broadcast bus.
+// Workers publish events to Redis; the adapter delivers them to all connected clients
+// regardless of which server process holds the socket.
+(async () => {
+  try {
+    const { createAdapter } = require("@socket.io/redis-adapter");
+    const Redis = require("ioredis");
+
+    const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+    const pubClient = new Redis(redisUrl, { lazyConnect: true });
+    const subClient = pubClient.duplicate();
+
+    const lastRedisErrorLogAt = new Map();
+    const REDIS_ERROR_LOG_INTERVAL_MS = 30000;
+
+    const logRedisError = (name) => (err) => {
+      const now = Date.now();
+      const lastAt = lastRedisErrorLogAt.get(name) || 0;
+      if (now - lastAt < REDIS_ERROR_LOG_INTERVAL_MS) return;
+      lastRedisErrorLogAt.set(name, now);
+      console.error(`[Socket.IO] ${name} Redis error:`, err.message);
+    };
+
+    pubClient.on("error", logRedisError("pubClient"));
+    subClient.on("error", logRedisError("subClient"));
+
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log("[Socket.IO] Redis adapter connected:", redisUrl);
+
+    // Subscribe to events published by cron worker processes.
+    // Workers cannot call io.emit() directly (no sockets), so they publish here
+    // and the server re-emits through the Redis-backed io so all cluster instances
+    // broadcast to their connected clients.
+    const workerSub = pubClient.duplicate();
+    workerSub.on("error", logRedisError("workerSub"));
+    await workerSub.connect();
+    await workerSub.subscribe("socket.io:worker-events");
+    workerSub.on("message", (_channel, message) => {
+      try {
+        const { event, payload } = JSON.parse(message);
+        io.emit(event, payload);
+      } catch (e) {
+        console.error("[Socket.IO] Worker event parse error:", e.message);
+      }
+    });
+    console.log("[Socket.IO] Subscribed to worker-events channel");
+  } catch (err) {
+    console.error("[Socket.IO] Redis adapter FAILED — falling back to in-memory (single process only):", err.message);
+  }
+})();
+
 const deviceRoutes = require("./routes/device");
 const upgradeRoutes = require("./routes/upgrade");
 const statusRoutes = require("./routes/status");
@@ -80,15 +133,17 @@ app.use("/sms", smsRoutes);
 
 
 const { setUserSockets } = require("./emitNotificationToUser");
+
 // Only import cron job functions for manual triggers, do NOT schedule them here
-const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io);
-const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io);
-const { updateShared } = require("./cron/updateShared")(io);
-const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io);
-const { updateSwitchConfiguration } = require("./cron/switchConfiguration.js")(io);
-const { updateL3VPN } = require("./cron/updateL3VPN.js")(io);
-const { updateFTTHData } = require("./cron/updateFTTH.js")(io);
-const { checkAdjacency } = require("./cron/isisAdjacent")(io);
+const { updateDIA, updateAggDevices } = require("./cron/updateDIA")(io, { schedule: false });
+const { updateIPT, updateAggDevicesIPT } = require("./cron/updateIPT")(io, { schedule: false });
+const { updateShared } = require("./cron/updateShared")(io, { schedule: false });
+const { cleanupStaleCustomers } = require("./cron/cleanupStaleCustomers")(io, { schedule: false });
+const { updateSwitchConfiguration } = require("./cron/switchConfiguration.js")(io, { schedule: false });
+const { updateL3VPN } = require("./cron/updateL3VPN.js")(io, { schedule: false });
+const { updateFTTHData } = require("./cron/updateFTTH.js")(io, { schedule: false });
+const { checkAdjacency } = require("./cron/isisAdjacent")(io, { schedule: false });
+const { cleanupStatusHistory } = require("./cron/cleanupStatusHistory")({ schedule: false });
 // Remove all schedule*Cron and auto-scheduling here; handled by PM2 forked workers
 // Socket for SSH
 
@@ -250,17 +305,6 @@ if (process.env.NODE_APP_INSTANCE === '0' || process.env.NODE_APP_INSTANCE === u
 
 
 
-const { rescheduleJobs } = require("./Controller/upgrade");
-const schedule = require("node-schedule");
-
 server.listen(4000, async () => {
   console.log("✅ DB connected, backend running at http://localhost:4000");
-  await rescheduleJobs();
-  schedule.scheduleJob("0 0 0,12 * * *", async function () {
-    console.log(
-      "🚨 Running daily check for temporary upgrade expirations (0000hrs and 1200hrs)..."
-    );
-    await rescheduleJobs();
-    console.log("✅ Daily check complete.");
-  });
 });

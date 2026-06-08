@@ -3,6 +3,8 @@ const db = require("../Models/index.js");
 const Customer = db.diacustomers;
 const IptCustomer = db.iptcustomers;
 const SharedCustomer = db.sharedcustomers;
+const L3VPNCustomerInfo = db.l3vpncustomerinfos;
+const L3VPNCustomer = db.l3vpncustomers;
 
 /**
  * Export DIA customers to Excel
@@ -312,6 +314,103 @@ exports.exportSharedCustomers = async (req, res) => {
 
   } catch (error) {
     console.error("Export Shared customers error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * Export L3VPN customers to Excel
+ */
+exports.exportL3VPNCustomers = async (req, res) => {
+  try {
+    const { status, nbr, search } = req.query;
+
+    const l3vpnCustomerInfos = await L3VPNCustomerInfo.findAll({
+      where: nbr
+        ? {
+            nbr: {
+              [db.Sequelize.Op.iLike]: `%${nbr}%`,
+            },
+          }
+        : undefined,
+      include: [
+        {
+          model: L3VPNCustomer,
+          where:
+            status && status !== "all"
+              ? { operationalStatus: status }
+              : undefined,
+          required: status && status !== "all" ? true : false,
+        },
+        {
+          model: db.client_dbs,
+          required: false,
+        },
+      ],
+    });
+
+    let filteredL3VPNCustomers = l3vpnCustomerInfos;
+    if (search) {
+      const searchLower = search.toLowerCase();
+      filteredL3VPNCustomers = l3vpnCustomerInfos.filter(
+        (customer) =>
+          customer.customerName?.toLowerCase().includes(searchLower) ||
+          customer.l3vpncustomer?.interface?.toLowerCase().includes(searchLower) ||
+          customer.cid?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    const excelData = filteredL3VPNCustomers.map((customer) => ({
+      "Customer Name": customer.customerName || "",
+      "Interface": customer.l3vpncustomer?.interface || "",
+      "CID": customer.cid || "",
+      "NBR": customer.nbr || "",
+      "Status": customer.l3vpncustomer?.operationalStatus || "",
+      "Switch Name": customer.l3vpncustomer?.switchName || "",
+      "Destination": customer.l3vpncustomer?.destination || "",
+      "Description": customer.l3vpncustomer?.description || "",
+      "Email": customer.client_db?.email_address || "",
+      "Phone": customer.client_db?.phone_number || "",
+      "Area": customer.client_db?.area || "",
+      "Provider": customer.client_db?.provider || "",
+      "Pastel Name": customer.client_db?.customer_name_pastel || "",
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(excelData);
+
+    const colWidths = [
+      { wch: 20 }, // Customer Name
+      { wch: 15 }, // Interface
+      { wch: 15 }, // CID
+      { wch: 15 }, // NBR
+      { wch: 10 }, // Status
+      { wch: 20 }, // Switch Name
+      { wch: 20 }, // Destination
+      { wch: 30 }, // Description
+      { wch: 25 }, // Email
+      { wch: 15 }, // Phone
+      { wch: 15 }, // Area
+      { wch: 15 }, // Provider
+      { wch: 20 }, // Pastel Name
+    ];
+    ws["!cols"] = colWidths;
+
+    XLSX.utils.book_append_sheet(wb, ws, "L3VPN Customers");
+
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+    const filename = `l3vpn_customers_${status || "all"}_${timestamp}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    res.send(buffer);
+  } catch (error) {
+    console.error("Export L3VPN customers error:", error);
     res.status(500).json({ error: error.message });
   }
 };

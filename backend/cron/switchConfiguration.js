@@ -5,7 +5,7 @@ const path = require("path");
 const db = require("../Models");
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = () => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -144,12 +144,12 @@ module.exports = () => {
     }
  }
 
-  cron.schedule("0 */2 * * *", () => {
-    console.log("[Switch Config] Cron job running every 2 hours.");
-    runAll();
-  });
-
-  // runAll();
+  if (options.schedule !== false) {
+    cron.schedule("0 */2 * * *", () => {
+      console.log("[Switch Config] Cron job running every 2 hours.");
+      runAll();
+    });
+  }
 
  return {
     updateSwitchConfiguration,

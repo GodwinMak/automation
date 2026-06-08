@@ -2,7 +2,18 @@ const db = require("../Models");
 const { Op, fn, col, literal, QueryTypes } = require("sequelize");
 
 const StatusChangeHistory = db.statusChangeHistories;
+const StatusChangeHistoryFtth = db.statusChangeHistoriesFtth;
 const Favorites = db.favorites;
+
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const summaryCache = new Map();
+const patternCache = new Map();
+
+const getCacheKey = (prefix, req) => {
+  const userKey = req.user ? `${req.user.id}:${req.user.role}` : "anon";
+  const queryKey = JSON.stringify(req.query || {});
+  return `${prefix}:${userKey}:${queryKey}`;
+};
 
 // Map favorite customerType (DIA, IPT, Shared) to churn types (DIA, IPT, SHARED)
 const mapFavoriteTypeToChurnType = (type) => {
@@ -98,7 +109,11 @@ exports.getStatusChanges = async (req, res) => {
       whereClause[Op.and].push({ [Op.or]: watchlistConditions });
     }
 
-    const { count, rows } = await StatusChangeHistory.findAndCountAll({
+    const historyModel = customerType === "FTTH"
+      ? StatusChangeHistoryFtth
+      : StatusChangeHistory;
+
+    const { count, rows } = await historyModel.findAndCountAll({
       where: whereClause,
       order: [["changedAt", "DESC"]],
       offset,
@@ -147,7 +162,11 @@ exports.getUnstableCustomers = async (req, res) => {
       whereClause[Op.and].push({ [Op.or]: watchlistConditions });
     }
 
-    const results = await StatusChangeHistory.findAll({
+    const historyModel = customerType === "FTTH"
+      ? StatusChangeHistoryFtth
+      : StatusChangeHistory;
+
+    const results = await historyModel.findAll({
       attributes: [
         "interface",
         "customerType",
@@ -281,6 +300,9 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     //
     // Use a GROUP BY subquery to fetch ONLY the latest row per (interface, customerType)
     // instead of loading every row into memory.
+    const historyTable = customerType === "FTTH"
+      ? "statusChangeHistories_ftth"
+      : "statusChangeHistories";
     const typeFilter = customerType
       ? "WHERE customerType = :customerType"
       : excludeFtthFlag
@@ -288,10 +310,10 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
         : "";
     const latestRows = await db.sequelize.query(
       `SELECT s.*
-       FROM statusChangeHistories s
+       FROM ${historyTable} s
        INNER JOIN (
          SELECT interface, customerType, MAX(changedAt) AS maxChangedAt
-         FROM statusChangeHistories
+         FROM ${historyTable}
          ${typeFilter}
          GROUP BY interface, customerType
        ) latest
@@ -506,11 +528,20 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
  */
 exports.getChurnSummary = async (req, res) => {
   try {
-    const { days = 30 } = req.query;
+    const { days = 30, customerType } = req.query;
+    const cacheKey = getCacheKey("summary", req);
+    const cached = summaryCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json(cached.payload);
+    }
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
     const baseWhere = { changedAt: { [Op.gte]: startDate } };
+
+    if (customerType) {
+      baseWhere.customerType = customerType;
+    }
 
     // Restrict customer_relation to watchlist
     let restrictedWhere = baseWhere;
@@ -537,63 +568,69 @@ exports.getChurnSummary = async (req, res) => {
       };
     }
 
-    // Total status changes
-    const totalChanges = await StatusChangeHistory.count({
-      where: restrictedWhere,
-    });
+    const historyModel = customerType === "FTTH"
+      ? StatusChangeHistoryFtth
+      : StatusChangeHistory;
 
-    // Changes by type
-    const changesByType = await StatusChangeHistory.findAll({
-      attributes: [
-        "customerType",
-        [fn("COUNT", col("id")), "totalChanges"],
-        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "wentDown"],
-        [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "cameUp"],
-      ],
-      where: restrictedWhere,
-      group: ["customerType"],
-      raw: true,
-    });
+    // Run all 5 summary queries in parallel
+    const [
+      totalChanges,
+      changesByType,
+      dailyTrend,
+      mostAffectedNbrs,
+      uniqueAffected,
+    ] = await Promise.all([
+      historyModel.count({ where: restrictedWhere }),
 
-    // Daily trend
-    const dailyTrend = await StatusChangeHistory.findAll({
-      attributes: [
-        [fn("DATE", col("changedAt")), "date"],
-        [fn("COUNT", col("id")), "changes"],
-        [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
-        [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "ups"],
-      ],
-      where: restrictedWhere,
-      group: [fn("DATE", col("changedAt"))],
-      order: [[fn("DATE", col("changedAt")), "ASC"]],
-      raw: true,
-    });
+      historyModel.findAll({
+        attributes: [
+          "customerType",
+          [fn("COUNT", col("id")), "totalChanges"],
+          [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "wentDown"],
+          [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "cameUp"],
+        ],
+        where: restrictedWhere,
+        group: ["customerType"],
+        raw: true,
+      }),
 
-    // Most affected NBRs
-    const mostAffectedNbrs = await StatusChangeHistory.findAll({
-      attributes: [
-        "nbr",
-        [fn("COUNT", col("id")), "changeCount"],
-        [fn("COUNT", fn("DISTINCT", col("interface"))), "uniqueCustomers"],
-      ],
-      where: {
-        ...restrictedWhere,
-        nbr: { [Op.ne]: null, [Op.ne]: "" },
-      },
-      group: ["nbr"],
-      order: [[literal("changeCount"), "DESC"]],
-      limit: 10,
-      raw: true,
-    });
+      historyModel.findAll({
+        attributes: [
+          [fn("DATE", col("changedAt")), "date"],
+          [fn("COUNT", col("id")), "changes"],
+          [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "downs"],
+          [fn("SUM", literal("CASE WHEN newStatus = 'up' THEN 1 ELSE 0 END")), "ups"],
+        ],
+        where: restrictedWhere,
+        group: [fn("DATE", col("changedAt"))],
+        order: [[fn("DATE", col("changedAt")), "ASC"]],
+        raw: true,
+      }),
 
-    // Unique customers affected
-    const uniqueAffected = await StatusChangeHistory.count({
-      distinct: true,
-      col: "interface",
-      where: restrictedWhere,
-    });
+      historyModel.findAll({
+        attributes: [
+          "nbr",
+          [fn("COUNT", col("id")), "changeCount"],
+          [fn("COUNT", fn("DISTINCT", col("interface"))), "uniqueCustomers"],
+        ],
+        where: {
+          ...restrictedWhere,
+          nbr: { [Op.ne]: null, [Op.ne]: "" },
+        },
+        group: ["nbr"],
+        order: [[literal("changeCount"), "DESC"]],
+        limit: 10,
+        raw: true,
+      }),
 
-    res.json({
+      historyModel.count({
+        distinct: true,
+        col: "interface",
+        where: restrictedWhere,
+      }),
+    ]);
+
+    const payload = {
       period: `Last ${days} days`,
       summary: {
         totalChanges,
@@ -602,7 +639,14 @@ exports.getChurnSummary = async (req, res) => {
       },
       dailyTrend,
       mostAffectedNbrs,
+    };
+
+    summaryCache.set(cacheKey, {
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      payload,
     });
+
+    res.json(payload);
   } catch (error) {
     console.error("Error fetching churn summary:", error);
     res.status(500).json({ error: error.message });
@@ -620,14 +664,18 @@ exports.getCustomerHistory = async (req, res) => {
     const whereClause = { interface: interfaceId };
     if (customerType) whereClause.customerType = customerType;
 
-    const history = await StatusChangeHistory.findAll({
+    const historyModel = customerType === "FTTH"
+      ? StatusChangeHistoryFtth
+      : StatusChangeHistory;
+
+    const history = await historyModel.findAll({
       where: whereClause,
       order: [["changedAt", "DESC"]],
       limit: parseInt(limit),
     });
 
     // Calculate statistics
-    const stats = await StatusChangeHistory.findOne({
+    const stats = await historyModel.findOne({
       attributes: [
         [fn("COUNT", col("id")), "totalChanges"],
         [fn("SUM", literal("CASE WHEN newStatus = 'down' THEN 1 ELSE 0 END")), "totalDowns"],
@@ -659,6 +707,11 @@ exports.getCustomerHistory = async (req, res) => {
 exports.getPatternAnalysis = async (req, res) => {
   try {
     const { days = 30, customerType } = req.query;
+    const cacheKey = getCacheKey("patterns", req);
+    const cached = patternCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json(cached.payload);
+    }
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
@@ -666,7 +719,11 @@ exports.getPatternAnalysis = async (req, res) => {
     if (customerType) whereClause.customerType = customerType;
 
     // Hourly pattern
-    const hourlyPattern = await StatusChangeHistory.findAll({
+    const historyModel = customerType === "FTTH"
+      ? StatusChangeHistoryFtth
+      : StatusChangeHistory;
+
+    const hourlyPattern = await historyModel.findAll({
       attributes: [
         [fn("HOUR", col("changedAt")), "hour"],
         [fn("COUNT", col("id")), "changes"],
@@ -679,7 +736,7 @@ exports.getPatternAnalysis = async (req, res) => {
     });
 
     // Day of week pattern
-    const dayOfWeekPattern = await StatusChangeHistory.findAll({
+    const dayOfWeekPattern = await historyModel.findAll({
       attributes: [
         [fn("DAYOFWEEK", col("changedAt")), "dayOfWeek"],
         [fn("COUNT", col("id")), "changes"],
@@ -693,7 +750,7 @@ exports.getPatternAnalysis = async (req, res) => {
 
     const dayNames = ["", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-    res.json({
+    const payload = {
       period: `Last ${days} days`,
       hourlyPattern: hourlyPattern.map((h) => ({
         ...h,
@@ -703,7 +760,14 @@ exports.getPatternAnalysis = async (req, res) => {
         ...d,
         dayName: dayNames[d.dayOfWeek] || "Unknown",
       })),
+    };
+
+    patternCache.set(cacheKey, {
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      payload,
     });
+
+    res.json(payload);
   } catch (error) {
     console.error("Error fetching pattern analysis:", error);
     res.status(500).json({ error: error.message });

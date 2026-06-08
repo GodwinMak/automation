@@ -1,6 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { exportDiaCustomers, exportIptCustomers, exportSharedCustomers } = require("../Controller/export");
+const {
+	exportDiaCustomers,
+	exportIptCustomers,
+	exportSharedCustomers,
+	exportL3VPNCustomers,
+} = require("../Controller/export");
 
 /**
  * Export DIA customers to Excel
@@ -19,5 +24,11 @@ router.get("/ipt", exportIptCustomers);
  * GET /export/shared?status=up&nbr=NBR001&search=customer
  */
 router.get("/shared", exportSharedCustomers);
+
+/**
+ * Export L3VPN customers to Excel
+ * GET /export/l3vpn?status=up&nbr=NBR001&search=customer
+ */
+router.get("/l3vpn", exportL3VPNCustomers);
 
 module.exports = router;

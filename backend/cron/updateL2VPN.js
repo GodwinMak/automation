@@ -12,6 +12,7 @@ module.exports = (io) => {
   };
 
   const devices = db.devices;
+  const sharedCustomer = db.sharedcustomerinfos;
 
   // === HELPER FUNCTIONS ===
 

@@ -170,6 +170,7 @@ const SmsBroadcast = () => {
       const res = await axios.post(
         `${PRODUCTION_URL}/sms/send`,
         {
+          sendMode: "specific",
           customerType,
           message: message.trim(),
           extraNumbers,

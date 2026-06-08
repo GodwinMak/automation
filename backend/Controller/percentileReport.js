@@ -104,66 +104,43 @@ const saveReportsBulk = async (req, res) => {
       return res.status(400).json({ error: "Reports array required" });
     }
 
-    const results = [];
-    let updated = 0;
-    let created = 0;
+    // Normalise customerId for each report
+    const rows = reports.map((report) => ({
+      reportType: report.reportType,
+      month: report.month,
+      customerId: report.customerId || (report.reportType === "GPON" ? "GPON" : null),
+      customerName: report.customerName,
+      nbr: report.nbr,
+      port: report.port,
+      switchName: report.switchName,
+      interface: report.interface,
+      capacity: report.capacity,
+      p95Sent: report.p95Sent,
+      p95Recv: report.p95Recv,
+      p95Combined: report.p95Combined,
+      displayUnit: report.displayUnit,
+      dataSource: report.dataSource,
+      samples: report.samples,
+      usedSwitch: report.usedSwitch,
+      status: report.status || "success",
+      errorMessage: report.errorMessage,
+      generatedAt: new Date(),
+    }));
 
-    for (const report of reports) {
-      try {
-        const customerId = report.customerId || (report.reportType === "GPON" ? "GPON" : null);
-        
-        // Check if record already exists
-        const existing = await PercentileReport.findOne({
-          where: {
-            reportType: report.reportType,
-            month: report.month,
-            customerId: customerId,
-          },
-        });
+    // Single upsert — inserts new rows or updates existing ones by (reportType, month, customerId)
+    await PercentileReport.bulkCreate(rows, {
+      updateOnDuplicate: [
+        "customerName", "nbr", "port", "switchName", "interface",
+        "capacity", "p95Sent", "p95Recv", "p95Combined", "displayUnit",
+        "dataSource", "samples", "usedSwitch", "status", "errorMessage", "generatedAt",
+      ],
+    });
 
-        if (existing) {
-          // Update existing record
-          await existing.update({
-            customerName: report.customerName,
-            nbr: report.nbr,
-            port: report.port,
-            switchName: report.switchName,
-            interface: report.interface,
-            capacity: report.capacity,
-            p95Sent: report.p95Sent,
-            p95Recv: report.p95Recv,
-            p95Combined: report.p95Combined,
-            displayUnit: report.displayUnit,
-            dataSource: report.dataSource,
-            samples: report.samples,
-            usedSwitch: report.usedSwitch,
-            status: report.status || "success",
-            errorMessage: report.errorMessage,
-            generatedAt: new Date(),
-          });
-          results.push({ success: true, id: existing.id, action: "updated" });
-          updated++;
-        } else {
-          // Create new record
-          const newRecord = await PercentileReport.create({
-            ...report,
-            customerId: customerId,
-            generatedAt: new Date(),
-          });
-          results.push({ success: true, id: newRecord.id, action: "created" });
-          created++;
-        }
-      } catch (err) {
-        results.push({ success: false, error: err.message, customerId: report.customerId });
-      }
-    }
-
-    res.json({ 
-      success: true, 
-      results, 
-      total: results.filter((r) => r.success).length,
-      created,
-      updated,
+    res.json({
+      success: true,
+      total: rows.length,
+      created: rows.length, // actual split unknown without SELECT, but all rows are upserted
+      updated: 0,
     });
   } catch (error) {
     console.error("Error saving reports bulk:", error);

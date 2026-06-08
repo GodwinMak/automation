@@ -247,66 +247,64 @@ exports.getNbrSummary = async (req, res) => {
   const searchQuery = req.query.search || "";
 
   try {
-    // 1️⃣ First: Fetch all grouped NBR rows
-    const results = await Customer.findAll({
-      attributes: [
-        "nbr",
-        [Sequelize.fn("COUNT", Sequelize.col("customerinfo.id")), "total_customers"],
-        [Sequelize.fn("SUM", Sequelize.col("customerinfo.downmbps")), "total_downmbps"],
-      ],
-      include: [
-        {
-          model: db.diacustomers,
-          attributes: [],
+    // Single query: GROUP BY nbr with conditional SUM for up/down counts
+    // Uses SQL LIMIT/OFFSET for proper DB-level pagination (no more JS slicing all rows)
+    const [results, totalCountResult] = await Promise.all([
+      Customer.findAll({
+        attributes: [
+          "nbr",
+          [Sequelize.fn("COUNT", Sequelize.col("customerinfo.id")), "total_customers"],
+          [Sequelize.fn("SUM", Sequelize.col("customerinfo.downmbps")), "total_downmbps"],
+          [
+            Sequelize.fn(
+              "SUM",
+              Sequelize.literal(
+                "CASE WHEN `diacustomer`.`operationalStatus` = 'up' THEN 1 ELSE 0 END"
+              )
+            ),
+            "up_customers",
+          ],
+          [
+            Sequelize.fn(
+              "SUM",
+              Sequelize.literal(
+                "CASE WHEN `diacustomer`.`operationalStatus` = 'down' THEN 1 ELSE 0 END"
+              )
+            ),
+            "down_customers",
+          ],
+        ],
+        include: [
+          {
+            model: db.diacustomers,
+            attributes: [],
+          },
+        ],
+        where: {
+          nbr: { [Sequelize.Op.like]: `%${searchQuery}%` },
         },
-      ],
-      where: {
-        nbr: { [Sequelize.Op.like]: `%${searchQuery}%` },
-      },
-      group: ["nbr"],
-      raw: true,
-    });
+        group: ["nbr"],
+        order: [["nbr", "ASC"]],
+        limit: pageSize,
+        offset,
+        raw: true,
+        subQuery: false,
+      }),
+      // Count total distinct NBR groups for pagination metadata
+      Customer.count({
+        distinct: true,
+        col: "nbr",
+        where: {
+          nbr: { [Sequelize.Op.like]: `%${searchQuery}%` },
+        },
+      }),
+    ]);
 
-    // Total rows BEFORE pagination
-    const totalItems = results.length;
+    const totalItems = totalCountResult;
     const totalPages = Math.ceil(totalItems / pageSize);
 
-    // 2️⃣ Apply pagination AFTER grouping
-    const paginated = results.slice(offset, offset + pageSize);
-
-    // 3️⃣ Add UP/DOWN counts per NBR
-    const withStatusCounts = await Promise.all(
-      paginated.map(async (row) => {
-        const upCount = await db.diacustomers.count({
-          include: [
-            {
-              model: Customer,
-              where: { nbr: row.nbr },
-            },
-          ],
-          where: { operationalStatus: "up" },
-        });
-
-        const downCount = await db.diacustomers.count({
-          include: [
-            {
-              model: Customer,
-              where: { nbr: row.nbr },
-            },
-          ],
-          where: { operationalStatus: "down" },
-        });
-
-        return {
-          ...row,
-          up_customers: upCount,
-          down_customers: downCount,
-        };
-      })
-    );
-
     res.status(200).json({
-      data: withStatusCounts,
+      data: results,
       totalItems,
       totalPages,
       currentPage: page,

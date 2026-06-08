@@ -7,7 +7,7 @@ const { trackStatusChanges } = require("../utils/statusTracker");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
-module.exports = (io) => {
+module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
@@ -79,18 +79,28 @@ module.exports = (io) => {
     return results;
   };
 
+  let isRunning = false;
   const updateFTTHData = async () => {
-    const ftthcustomer = db.ftthcustomers;
-
-    // Distributed lock across all PM2 instances via MySQL advisory lock.
-    // GET_LOCK('name', 0) returns 1 if acquired, 0 if another connection holds it.
-    const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('ftth_cron_update', 0) AS acquired"
-    );
-    if (!acquired) {
-      console.warn("[FTTH] Another instance is already running — skipping this tick.");
+    if (isRunning) {
+      console.warn("[FTTH] Sync already in progress — skipping this tick.");
       return;
     }
+    isRunning = true;
+    const ftthcustomer = db.ftthcustomers;
+
+    try {
+      // Distributed lock across all PM2 instances via MySQL advisory lock.
+      // GET_LOCK('name', 0) returns 1 if acquired, 0 if another connection holds it.
+      const [[{ acquired }]] = await db.sequelize.query(
+        "SELECT GET_LOCK('ftth_cron_update', 0) AS acquired"
+      );
+      if (!acquired) {
+        if (process.env.LOG_LOCK_SKIPS === "1") {
+          console.warn("[FTTH] Another instance is already running — skipping this tick.");
+        }
+        isRunning = false;
+        return;
+      }
 
     const runStart = new Date();
     try {
@@ -134,20 +144,38 @@ module.exports = (io) => {
         return;
       }
 
+      const activeIps = allRecords.map((r) => r.ip);
+
+      // 1. Fetch only transitioning customers before executing updates to avoid massive full-table loads
+      const transitioningToUp = await ftthcustomer.findAll({
+        where: {
+          ip: activeIps,
+          status: "down",
+        },
+        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber"],
+        raw: true,
+      });
+
+      const transitioningToDown = await ftthcustomer.findAll({
+        where: {
+          ip: { [Op.notIn]: activeIps },
+          status: "up",
+        },
+        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber"],
+        raw: true,
+      });
+
+      // 2. Perform database updates
       // Upsert seen records as "up"
       // updateOnDuplicate on pppoeusername unique key → update ip/version/status in place
-      // (handles IPv6→IPv4 switch where same username gets a new IP)
       const upRecords = allRecords.map((r) => ({ ...r, status: "up" }));
       await ftthcustomer.bulkCreate(upRecords, {
-        // Include updatedAt so Sequelize stamps it on upsert — we use it below
         updateOnDuplicate: ["ip", "ip_version", "status", "updatedAt"],
       });
 
       console.log(`[FTTH] Upserted ${allRecords.length} subscriber(s) as up.`);
 
       // Mark as "down" any record not touched in this run.
-      // Comparing updatedAt < runStart avoids a NOT IN (thousands of usernames)
-      // query that caused table-lock deadlocks between overlapping cron runs.
       const [downCount] = await ftthcustomer.update(
         { status: "down" },
         { where: { updatedAt: { [Op.lt]: runStart } } }
@@ -157,27 +185,35 @@ module.exports = (io) => {
         console.log(`[FTTH] Marked ${downCount} subscriber(s) as down.`);
       }
 
-      // Track status changes for churn analysis
-      const allFtthCustomers = await ftthcustomer.findAll({
-        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber", "status"],
-        raw: true,
-      });
-      const ftthInfoMap = Object.fromEntries(
-        allFtthCustomers.map((r) => [
-          r.ip,
-          { customerName: r.customerName || r.pppoeusername, cid: r.customerID || null, nbr: r.homeNumber || null },
-        ])
-      );
-      await trackStatusChanges(
-        allFtthCustomers.map((r) => ({ interface: r.ip, operationalStatus: r.status, switchName: null })),
-        "FTTH",
-        ftthInfoMap
-      );
+      // 3. Track status changes using only the transitioned subset (highly memory efficient)
+      const changedFtthCustomers = [
+        ...transitioningToUp.map(r => ({ ...r, status: "up" })),
+        ...transitioningToDown.map(r => ({ ...r, status: "down" }))
+      ];
 
-    } catch (error) {
-      console.error("[FTTH] Error updating FTTH data:", error);
+      if (changedFtthCustomers.length > 0) {
+        const ftthInfoMap = Object.fromEntries(
+          changedFtthCustomers.map((r) => [
+            r.ip,
+            { customerName: r.customerName || r.pppoeusername, cid: r.customerID || null, nbr: r.homeNumber || null },
+          ])
+        );
+        await trackStatusChanges(
+          changedFtthCustomers.map((r) => ({ interface: r.ip, operationalStatus: r.status, switchName: null })),
+          "FTTH",
+          ftthInfoMap
+        );
+      }
+
+      } catch (error) {
+        console.error("[FTTH] Error updating FTTH data:", error);
+      } finally {
+        await db.sequelize.query("SELECT RELEASE_LOCK('ftth_cron_update')");
+      }
+    } catch (outerError) {
+      console.error("[FTTH] Outer Error:", outerError.message);
     } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('ftth_cron_update')");
+      isRunning = false;
     }
   };
 
@@ -188,7 +224,10 @@ module.exports = (io) => {
         console.error("[Main Runner] Fatal error:", err.message);
       }
     };
-    cron.schedule("*/5 * * * *", runAll);
+    if (options.schedule !== false) {
+      cron.schedule("4,9,14,19,24,29,34,39,44,49,54,59 * * * *", runAll);
+      console.log("[FTTH] Sync cron job scheduled with 4-minute offset to prevent BNG CPU and DB collisions.");
+    }
 
     return {  
     updateFTTHData,
