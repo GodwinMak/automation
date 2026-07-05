@@ -2,7 +2,11 @@ const cron = require("node-cron");
 const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op, literal } = require("sequelize");
-const { trackStatusChanges, getSharedCustomerInfoMap } = require("../utils/statusTracker");
+const {
+  trackStatusChanges,
+  getSharedCustomerInfoMap,
+} = require("../utils/statusTracker");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -19,13 +23,9 @@ module.exports = (io, options = {}) => {
   const sharedcustomers = db.sharedcustomers;
   const sharedcustomerinfos = db.sharedcustomerinfos;
 
-  const acc2_raha = [
-    { name: "LTZ-ACC2-RAH", host: "41.175.37.20" }
-  ]
+  const acc2_raha = [{ name: "LTZ-ACC2-RAH", host: "41.175.37.20" }];
 
-  const acc3_raha = [
-    { name: "LTZ-ACC3-RAH", host: "41.175.37.21" }
-  ]
+  const acc3_raha = [{ name: "LTZ-ACC3-RAH", host: "41.175.37.21" }];
 
   const agg = [
     { name: "LTZ-AGG1-RAH", host: "41.175.37.5" },
@@ -92,7 +92,7 @@ module.exports = (io, options = {}) => {
       nbr: "",
       port: "",
       customerName: "",
-      capacity: 0
+      capacity: 0,
     };
 
     // Capture ALL key=value pairs, case-insensitive
@@ -141,11 +141,11 @@ module.exports = (io, options = {}) => {
 
     if (customerRecords.length > 0) {
       await sharedcustomerinfos.bulkCreate(customerRecords, {
-        updateOnDuplicate: ["nbr", "port", "customerName","capacity"],
+        updateOnDuplicate: ["nbr", "port", "customerName", "capacity"],
       });
 
       console.log(
-        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`
+        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`,
       );
     }
   };
@@ -165,14 +165,15 @@ module.exports = (io, options = {}) => {
       .filter(Boolean);
 
     // Regex to capture: interface ge-0/0/XX.XXXX virtual-circuit-id XXXXXXXXXX
-    const regex = /interface\s+(ge-\d+\/\d+\/\d+\.\d+)\s+virtual-circuit-id\s+(\d+)/i;
+    const regex =
+      /interface\s+(ge-\d+\/\d+\/\d+\.\d+)\s+virtual-circuit-id\s+(\d+)/i;
 
     for (const line of lines) {
       const match = line.match(regex);
 
       if (match) {
         const iface = match[1]; // ge-0/0/36.3040
-        let cid = match[2];     // 2554900787
+        let cid = match[2]; // 2554900787
 
         // Transform CID: 2554900787 → LTZ4900787
         if (cid.startsWith("255")) {
@@ -194,7 +195,9 @@ module.exports = (io, options = {}) => {
       where: { cid: { [Op.is]: null } },
     });
 
-    console.log(`[Shared Updater] ${needCid.length} records need circuit id lookup.`);
+    console.log(
+      `[Shared Updater] ${needCid.length} records need circuit id lookup.`,
+    );
 
     const cidMap = new Map();
 
@@ -202,23 +205,25 @@ module.exports = (io, options = {}) => {
     const switchCommands = [
       {
         ...acc2_raha[0],
-        cmd: 'show configuration |display set |match ge-0/0/63 |match circuit-id'
+        cmd: "show configuration |display set |match ge-0/0/63 |match circuit-id",
       },
       {
         ...acc3_raha[0],
-        cmd: 'show configuration |display set |match ge-0/0/36 |match circuit-id'
-      }
+        cmd: "show configuration |display set |match ge-0/0/36 |match circuit-id",
+      },
     ];
 
     // 1. Fetch CID data from each switch
     const switchResults = await Promise.allSettled(
       switchCommands.map(async (sw) => {
-        console.log(`[Shared Updater] Fetching CID from ${sw.name} (${sw.host})...`);
+        console.log(
+          `[Shared Updater] Fetching CID from ${sw.name} (${sw.host})...`,
+        );
         console.log(`[Shared Updater] Command: ${sw.cmd}`);
-        
+
         const output = await runCommand(sw.host, sw.cmd);
         return { sw, map: parseInterfaceCid(output) };
-      })
+      }),
     );
 
     // 2. Merge all switch maps into one central cidMap
@@ -229,7 +234,10 @@ module.exports = (io, options = {}) => {
         }
         console.log(`[Shared Updater] ✅ Fetched from ${result.value.sw.name}`);
       } else {
-        console.error(`[Shared Updater] ❌ Error fetching CID:`, result.reason.message);
+        console.error(
+          `[Shared Updater] ❌ Error fetching CID:`,
+          result.reason.message,
+        );
       }
     }
     console.log(`[Shared Updater] Merged CID map size: ${cidMap.size}`);
@@ -263,9 +271,11 @@ module.exports = (io, options = {}) => {
         })),
         {
           updateOnDuplicate: ["cid"],
-        }
+        },
       );
-      console.log(`[Shared Updater] ✅ Updated ${updates.length} records with CID.`);
+      console.log(
+        `[Shared Updater] ✅ Updated ${updates.length} records with CID.`,
+      );
     } else {
       console.log(`[Shared Updater] ℹ️ No new CIDs to update.`);
     }
@@ -280,27 +290,40 @@ module.exports = (io, options = {}) => {
       const acc2_rahaResults = await Promise.all(
         acc2_raha.map(async (sw) => {
           console.log(`[Shared Updater] Fetching from ${sw.name}...`);
-          const descOutput = await runCommand(sw.host, "show interfaces descriptions | match ge-0/0/63 | match cat" );
+          const descOutput = await runCommand(
+            sw.host,
+            "show interfaces descriptions | match ge-0/0/63 | match cat",
+          );
 
           const parsed = parseInterfaces(descOutput, sw.name);
 
-          console.log(`[Shared Updater] ${sw.name} returned ${parsed.length} interfaces`);
+          console.log(
+            `[Shared Updater] ${sw.name} returned ${parsed.length} interfaces`,
+          );
           return parsed;
-        })
-      )
+        }),
+      );
 
       const acc3_rahaResults = await Promise.all(
         acc3_raha.map(async (sw) => {
           console.log(`[Shared Updater] Fetching from ${sw.name}...`);
-          const descOutput = await runCommand(sw.host, "show interfaces descriptions |match ge-0/0/36 | match cat" );
+          const descOutput = await runCommand(
+            sw.host,
+            "show interfaces descriptions |match ge-0/0/36 | match cat",
+          );
           const parsed = parseInterfaces(descOutput, sw.name);
-          console.log(`[Shared Updater] ${sw.name} returned ${parsed.length} interfaces`);
+          console.log(
+            `[Shared Updater] ${sw.name} returned ${parsed.length} interfaces`,
+          );
           return parsed;
-        })
-      )
+        }),
+      );
 
-      let allInterfaces = [...acc2_rahaResults.flat(), ...acc3_rahaResults.flat()];
-      console.log(allInterfaces.length)
+      let allInterfaces = [
+        ...acc2_rahaResults.flat(),
+        ...acc3_rahaResults.flat(),
+      ];
+      console.log(allInterfaces.length);
 
       // === STATUS CHANGE TRACKING ===
       console.log("[Shared Updater] Tracking status changes...");
@@ -321,22 +344,55 @@ module.exports = (io, options = {}) => {
 
       // === Step 2: Upsert customerinfo ===
       await upsertCustomerInfo(allInterfaces);
-        // === Step 3: Fetch Circuit id ====
+      // === Step 3: Fetch Circuit id ====
       await fetchInterfaceCid();
+
+      // === Step 4: Warehouse tap — now runs AFTER cid enrichment ===
+      const interfaceNames = allInterfaces.map((d) => d.interface);
+      const [freshSharedRows, freshInfoRows] = await Promise.all([
+        sharedcustomers.findAll({ where: { interface: interfaceNames } }),
+        sharedcustomerinfos.findAll({ where: { interface: interfaceNames } }),
+      ]);
+      const infoByInterface = new Map(
+        freshInfoRows.map((i) => [i.interface, i.toJSON()]),
+      );
+      const mergedRecords = freshSharedRows.map((d) => {
+        const shared = d.toJSON();
+        const info = infoByInterface.get(shared.interface) || {};
+        return {
+          record_key: shared.interface,
+          cid: info.cid || null,
+          poll_ts: new Date(),
+          payload: {
+            interface: shared.interface,
+            switchName: shared.switchName,
+            adminStatus: shared.adminStatus,
+            operationalStatus: shared.operationalStatus,
+            description: shared.description,
+            nbr: info.nbr || null,
+            port: info.port || null,
+            customerName: info.customerName || null,
+            cid: info.cid || null,
+            capacity: info.capacity || null,
+          },
+        };
+      });
+      enqueueBatch("SHARED", mergedRecords);
     } catch (error) {
       console.error("[IPT Updater] Fatal error:", err.message);
     }
     console.log("[shared Updater] Finished run.\n");
-
-  }
+  };
 
   const runAll = async () => {
     const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('shared_cron_update', 0) AS acquired"
+      "SELECT GET_LOCK('shared_cron_update', 0) AS acquired",
     );
     if (!acquired) {
       if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn("[Shared] Another instance is already running — skipping this tick.");
+        console.warn(
+          "[Shared] Another instance is already running — skipping this tick.",
+        );
       }
       return;
     }
@@ -353,7 +409,7 @@ module.exports = (io, options = {}) => {
     console.log("[Shared] Sync cron job scheduled with 2-minute offset.");
   }
 
-  return {  
+  return {
     updateShared,
   };
-}
+};

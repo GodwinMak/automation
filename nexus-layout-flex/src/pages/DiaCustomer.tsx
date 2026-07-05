@@ -96,6 +96,26 @@ const DiaCustomer = () => {
     setPage(1);
   };
 
+  const formatRemainingTime = (expiresAt) => {
+    if (!expiresAt) return "No expiry";
+
+    const now = new Date();
+    const expiry = new Date(expiresAt);
+    if (isNaN(expiry.getTime())) return "Invalid expiry";
+
+    const diffMs = expiry.getTime() - now.getTime();
+    if (diffMs <= 0) return "Expired";
+
+    const totalMinutes = Math.floor(diffMs / (1000 * 60));
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const minutes = totalMinutes % 60;
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
   const columns = [
     { key: "customerName", label: "Customer Name" },
     { key: "interface", label: "Interface" },
@@ -108,6 +128,14 @@ const DiaCustomer = () => {
       label: "Upgrade Type",
       render: (customer) =>
         customer?.upgrade_type === "temporary" ? "Temporary" : "Permanent",
+    },
+    {
+      key: "remaining_time",
+      label: "Remaining Time",
+      render: (customer) => {
+        if (customer?.upgrade_type !== "temporary") return "-";
+        return formatRemainingTime(customer?.expires_at);
+      },
     },
     {
       key: "operationalStatus",

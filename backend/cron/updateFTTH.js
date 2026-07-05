@@ -4,6 +4,7 @@ const db = require("../Models");
 const { Op, literal } = require("sequelize");
 const { parse } = require("path");
 const { trackStatusChanges } = require("../utils/statusTracker");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -184,6 +185,54 @@ module.exports = (io, options = {}) => {
       if (downCount > 0) {
         console.log(`[FTTH] Marked ${downCount} subscriber(s) as down.`);
       }
+
+      const ftthRecords = await ftthcustomer.findAll({
+        attributes: [
+          "ip",
+          "pppoeusername",
+          "ip_version",
+          "status",
+          "customerID",
+          "customerName",
+          "homeNumber",
+          "topUpExpiry",
+          "isExpired",
+          "isAliveWhileExpired",
+          "isFreeCustomer",
+        ],
+        raw: true,
+      });
+      const ftthInfoRecords = await db.ftthcustomerinfos.findAll({
+        attributes: ["customerID", "emailAddress", "validityPeriod"],
+        raw: true,
+      });
+      const infoByCustomerID = new Map(
+        ftthInfoRecords.map((i) => [i.customerID, i]),
+      );
+      const mergedRecords = ftthRecords.map((f) => {
+        const info = infoByCustomerID.get(f.customerID) || {};
+        return {
+          record_key: f.customerID || f.pppoeusername || f.ip,
+          cid: null,
+          poll_ts: new Date(),
+          payload: {
+            ip: f.ip,
+            pppoeusername: f.pppoeusername,
+            ip_version: f.ip_version,
+            status: f.status,
+            customerID: f.customerID,
+            customerName: f.customerName,
+            homeNumber: f.homeNumber,
+            topUpExpiry: f.topUpExpiry,
+            isExpired: f.isExpired,
+            isAliveWhileExpired: f.isAliveWhileExpired,
+            isFreeCustomer: f.isFreeCustomer,
+            emailAddress: info.emailAddress || null,
+            validityPeriod: info.validityPeriod || null,
+          },
+        };
+      });
+      enqueueBatch("FTTH", mergedRecords);
 
       // 3. Track status changes using only the transitioned subset (highly memory efficient)
       const changedFtthCustomers = [

@@ -2,7 +2,11 @@ const cron = require("node-cron");
 const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op, literal } = require("sequelize");
-const { trackStatusChanges, getIptCustomerInfoMap } = require("../utils/statusTracker");
+const {
+  trackStatusChanges,
+  getIptCustomerInfoMap,
+} = require("../utils/statusTracker");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -10,7 +14,7 @@ module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
-    readyTimeout: 15000,      // fail fast if switch is unreachable
+    readyTimeout: 15000, // fail fast if switch is unreachable
     keepaliveInterval: 10000, // detect dead sockets
     keepaliveCountMax: 2,
   };
@@ -142,7 +146,7 @@ module.exports = (io, options = {}) => {
       });
 
       console.log(
-        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`
+        `[CustomerInfo] Upsert done. Processed ${customerRecords.length} records.`,
       );
     }
   };
@@ -168,7 +172,7 @@ module.exports = (io, options = {}) => {
 
     for (const line of lines) {
       const match = line.match(
-        /^set interfaces (\S+) unit (\d+) layer2-policer (input-policer|output-policer) (\S+-POLICER)$/i
+        /^set interfaces (\S+) unit (\d+) layer2-policer (input-policer|output-policer) (\S+-POLICER)$/i,
       );
 
       if (!match) {
@@ -204,11 +208,10 @@ module.exports = (io, options = {}) => {
       } else if (direction.toLowerCase().includes("output")) {
         entry.downmbps = mbps; // output-policer → downmbps
       }
-
     }
 
     console.log(
-      `[parsePolicerOutput] Finished parsing. Found ${map.size} entries.`
+      `[parsePolicerOutput] Finished parsing. Found ${map.size} entries.`,
     );
 
     return map;
@@ -223,7 +226,7 @@ module.exports = (io, options = {}) => {
       const switchResults = await Promise.allSettled(
         allDevices.map(async (sw) => {
           console.log(
-            `[BandwidthUpdater] Running on ${sw.name} (${sw.host})...`
+            `[BandwidthUpdater] Running on ${sw.name} (${sw.host})...`,
           );
 
           const cmd = `show configuration interfaces | display set | match "policer"`;
@@ -231,11 +234,11 @@ module.exports = (io, options = {}) => {
           const output = await runCommand(sw.host, cmd);
 
           console.log(
-            `[BandwidthUpdater] Raw output from ${sw.name}:\n---\n${output}\n---`
+            `[BandwidthUpdater] Raw output from ${sw.name}:\n---\n${output}\n---`,
           );
 
           return { sw, map: parsePolicerOutput(output) };
-        })
+        }),
       );
 
       // Step 2: Merge all switch maps
@@ -245,7 +248,7 @@ module.exports = (io, options = {}) => {
       for (const result of switchResults) {
         if (result.status === "fulfilled") {
           console.log(
-            `[BandwidthUpdater] Parsed ${result.value.map.size} entries from ${result.value.sw.name}`
+            `[BandwidthUpdater] Parsed ${result.value.map.size} entries from ${result.value.sw.name}`,
           );
 
           for (const [key, val] of result.value.map.entries()) {
@@ -255,13 +258,13 @@ module.exports = (io, options = {}) => {
           console.error(
             `[BandwidthUpdater] ❌ Error from switch:`,
 
-            result.reason.message
+            result.reason.message,
           );
         }
       }
 
       console.log(
-        `[BandwidthUpdater] Merged policer map size: ${policerMap.size}`
+        `[BandwidthUpdater] Merged policer map size: ${policerMap.size}`,
       );
 
       // Step 3: Fetch all customer infos
@@ -311,7 +314,7 @@ module.exports = (io, options = {}) => {
           console.log(
             `[BandwidthUpdater] Queued update for ${info.interface}:`,
 
-            updateObj
+            updateObj,
           );
         }
       }
@@ -324,7 +327,7 @@ module.exports = (io, options = {}) => {
         });
 
         console.log(
-          `[BandwidthUpdater] ✅ Updated ${updates.length} customer records`
+          `[BandwidthUpdater] ✅ Updated ${updates.length} customer records`,
         );
       } else {
         console.log("[BandwidthUpdater] ℹ️ No updates needed");
@@ -333,7 +336,6 @@ module.exports = (io, options = {}) => {
       console.error("[BandwidthUpdater] ❌ Fatal error:", err.message);
     }
   };
-
 
   const parseInterfaceAddresses = (output) => {
     if (!output) {
@@ -427,7 +429,7 @@ module.exports = (io, options = {}) => {
     const switchResults = await Promise.allSettled(
       allDevices.map(async (sw) => {
         console.log(
-          `[DIA Updater] Fetching addresses from ${sw.name} (${sw.host})...`
+          `[DIA Updater] Fetching addresses from ${sw.name} (${sw.host})...`,
         );
 
         // 🎯 The new command you requested
@@ -435,7 +437,7 @@ module.exports = (io, options = {}) => {
         const output = await runCommand(sw.host, cmd);
 
         return { sw, map: parseInterfaceAddresses(output) };
-      })
+      }),
     );
     // 2. Merge all switch maps into one central addressMap
     for (const result of switchResults) {
@@ -446,7 +448,7 @@ module.exports = (io, options = {}) => {
       } else {
         console.error(
           `[DIA Updater] ❌ Error fetching addresses from switch:`,
-          result.reason.message
+          result.reason.message,
         );
       }
     }
@@ -478,11 +480,11 @@ module.exports = (io, options = {}) => {
         })),
         {
           updateOnDuplicate: ["destination"],
-        }
+        },
       );
 
       console.log(
-        `[DIA Updater] ✅ Updated ${updates.length} records with interface IP addresses.`
+        `[DIA Updater] ✅ Updated ${updates.length} records with interface IP addresses.`,
       );
     } else {
       console.log(`[DIA Updater] ℹ️ No new interface IP addresses to update.`);
@@ -504,7 +506,7 @@ module.exports = (io, options = {}) => {
     const switchResults = await Promise.allSettled(
       allDevices.map(async (sw) => {
         console.log(
-          `[DIA Updater] Fetching cid from ${sw.name} (${sw.host})...`
+          `[DIA Updater] Fetching cid from ${sw.name} (${sw.host})...`,
         );
 
         //🎯 The new command you requested
@@ -512,7 +514,7 @@ module.exports = (io, options = {}) => {
         const output = await runCommand(sw.host, cmd);
 
         return { sw, map: parseInterfaceCid(output) };
-      })
+      }),
     );
 
     // 2. Merge all switch mpas into one central addressMap
@@ -524,7 +526,7 @@ module.exports = (io, options = {}) => {
       } else {
         console.error(
           `[DIA Updater] ❌ Error fetching addresses from switch:`,
-          result.reason.message
+          result.reason.message,
         );
       }
     }
@@ -562,10 +564,10 @@ module.exports = (io, options = {}) => {
         })),
         {
           updateOnDuplicate: ["cid"],
-        }
+        },
       );
       console.log(
-        `[DIA Updater] ✅ Updated ${updates.length} records with interface circuit id.`
+        `[DIA Updater] ✅ Updated ${updates.length} records with interface circuit id.`,
       );
     } else {
       console.log(`DIA Updater] ℹ️ No new interface circuit id to update.`);
@@ -624,7 +626,7 @@ module.exports = (io, options = {}) => {
       const dest = rec.iptcustomer?.destination;
       if (!dest) {
         console.log(
-          `[ASN Updater] ⚠️ No destination found for ${rec.interface}`
+          `[ASN Updater] ⚠️ No destination found for ${rec.interface}`,
         );
         continue;
       }
@@ -632,7 +634,7 @@ module.exports = (io, options = {}) => {
       // Compute peer IP
       const ipToCheck = getPeerIP(dest);
       console.log(
-        `[ASN Updater] Looking up ASN for ${rec.interface} using ${ipToCheck}`
+        `[ASN Updater] Looking up ASN for ${rec.interface} using ${ipToCheck}`,
       );
 
       const cmd = `show configuration | display set | match ${ipToCheck} | match peer-as`;
@@ -648,7 +650,7 @@ module.exports = (io, options = {}) => {
           if (asn) {
             foundASN = asn;
             console.log(
-              `[ASN Updater] ${rec.interface} → ${asn} (from ${sw.host})`
+              `[ASN Updater] ${rec.interface} → ${asn} (from ${sw.host})`,
             );
             break; // ⛔ STOP querying devices for this record
           }
@@ -678,11 +680,11 @@ module.exports = (io, options = {}) => {
           customerName: rec.customerName,
           asn: rec.asn,
         })),
-        { updateOnDuplicate: ["asn"] }
+        { updateOnDuplicate: ["asn"] },
       );
 
       console.log(
-        `[ASN Updater] ✅ Updated ${updates.length} records with ASN.`
+        `[ASN Updater] ✅ Updated ${updates.length} records with ASN.`,
       );
     } else {
       console.log(`[ASN Updater] ℹ️ No new ASN to update.`);
@@ -700,14 +702,14 @@ module.exports = (io, options = {}) => {
           console.log(`[IPT Updater] Fetching from ${sw.name}...`);
           const descOutput = await runCommand(
             sw.host,
-            `show interfaces descriptions | match cat | match IPT`
+            `show interfaces descriptions | match cat | match IPT`,
           );
           const parsed = parseInterfaces(descOutput, sw.name);
           console.log(
-            `[IPT Updater] ${sw.name} returned ${parsed.length} interfaces`
+            `[IPT Updater] ${sw.name} returned ${parsed.length} interfaces`,
           );
           return parsed;
-        })
+        }),
       );
 
       const pResults = await Promise.all(
@@ -717,10 +719,10 @@ module.exports = (io, options = {}) => {
           const descOutput = await runCommand(p.host, cmd);
           const parsed = parseInterfaces(descOutput, p.name);
           console.log(
-            `[IPT Updater] PE ${p.name} returned ${parsed.length} interfaces`
+            `[IPT Updater] PE ${p.name} returned ${parsed.length} interfaces`,
           );
           return parsed;
-        })
+        }),
       );
 
       let allInterfaces = [...peResults.flat(), ...pResults.flat()];
@@ -740,7 +742,7 @@ module.exports = (io, options = {}) => {
         } else {
           // If already seen, check for preference
           const existingIsFromP = pe.some(
-            (p) => p.name === existing.switchName
+            (p) => p.name === existing.switchName,
           );
 
           if (isFromP && !existingIsFromP) {
@@ -784,6 +786,41 @@ module.exports = (io, options = {}) => {
       await fetchInterfaceASN();
       //   // === Step 7: Update bandwidths via policers ===
       await updateBandwidths();
+
+      // === Step 8: Warehouse tap — now runs AFTER all enrichment is complete ===
+      const interfaceNames = allInterfaces.map((d) => d.interface);
+      const [freshIptRows, freshInfoRows] = await Promise.all([
+        iptcustomers.findAll({ where: { interface: interfaceNames } }),
+        iptcustomerinfos.findAll({ where: { interface: interfaceNames } }),
+      ]);
+      const infoByInterface = new Map(
+        freshInfoRows.map((i) => [i.interface, i.toJSON()]),
+      );
+      const mergedRecords = freshIptRows.map((d) => {
+        const ipt = d.toJSON();
+        const info = infoByInterface.get(ipt.interface) || {};
+        return {
+          record_key: ipt.interface,
+          cid: info.cid || null,
+          poll_ts: new Date(),
+          payload: {
+            interface: ipt.interface,
+            switchName: ipt.switchName,
+            adminStatus: ipt.adminStatus,
+            operationalStatus: ipt.operationalStatus,
+            description: ipt.description,
+            destination: ipt.destination,
+            nbr: info.nbr || null,
+            port: info.port || null,
+            customerName: info.customerName || null,
+            cid: info.cid || null,
+            upmbps: info.upmbps || null,
+            downmbps: info.downmbps || null,
+            asn: info.asn || null,
+          },
+        };
+      });
+      enqueueBatch("IPT", mergedRecords);
     } catch (err) {
       console.error("[IPT Updater] Fatal error:", err.message);
     }
@@ -830,14 +867,14 @@ module.exports = (io, options = {}) => {
           const shortIntf = `${base}.0`;
 
           console.log(
-            `[AGG Updater] Trying PE interfaces for ${nbr}, interface: ${shortIntf}`
+            `[AGG Updater] Trying PE interfaces for ${nbr}, interface: ${shortIntf}`,
           );
 
           for (const r of pe) {
             try {
               const neighOut = await runCommand(
                 r.host,
-                `show l2circuit connections interface ${shortIntf} | match Neighbor`
+                `show l2circuit connections interface ${shortIntf} | match Neighbor`,
               );
               const neighRegex = /Neighbor:\s+(\d{1,3}(?:\.\d{1,3}){3})/i;
               const neighMatch = neighOut.match(neighRegex);
@@ -846,7 +883,7 @@ module.exports = (io, options = {}) => {
 
               const ip = neighMatch[1];
               console.log(
-                `[AGG Updater] Found neighbor ${ip} on ${r.name} for ${nbr}`
+                `[AGG Updater] Found neighbor ${ip} on ${r.name} for ${nbr}`,
               );
               if (nbr === "LTZ-ACC1-DAR") {
                 // i want to not enter in the agg loop if the nbr is ltz-acc1-dar
@@ -860,12 +897,12 @@ module.exports = (io, options = {}) => {
 
                 const descOut = await runCommand(
                   sw.host,
-                  `show configuration | display set | match ${ip}`
+                  `show configuration | display set | match ${ip}`,
                 );
 
                 const descRegex = new RegExp(
                   `neighbor\\s+${ip}\\s+description\\s+(?:"([^"]+)"|(\\S+))`,
-                  "i"
+                  "i",
                 );
 
                 const descMatch = descOut.match(descRegex);
@@ -899,24 +936,24 @@ module.exports = (io, options = {}) => {
                     if (!device) {
                       await Device.upsert(
                         { ip, name: finalDescription },
-                        { fields: ["ip", "name"] }
+                        { fields: ["ip", "name"] },
                       );
                       await iptcustomerinfos.update(
                         { nbr: finalDescription },
-                        { where: { id } }
+                        { where: { id } },
                       );
                       console.log(
-                        `[AGG Updater] Updated customerinfo id=${id} with nbr=${finalDescription}`
+                        `[AGG Updater] Updated customerinfo id=${id} with nbr=${finalDescription}`,
                       );
                     } else {
                       await iptcustomerinfos.update(
                         { nbr: finalDescription },
-                        { where: { id } }
+                        { where: { id } },
                       );
                     }
                   } else {
                     console.log(
-                      `[AGG Updater] ⚠️ Skipping invalid name for ${nbr}: "${finalDescription}"`
+                      `[AGG Updater] ⚠️ Skipping invalid name for ${nbr}: "${finalDescription}"`,
                     );
                   }
 
@@ -937,17 +974,19 @@ module.exports = (io, options = {}) => {
 
   const runAll = async () => {
     const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('ipt_cron_update', 0) AS acquired"
+      "SELECT GET_LOCK('ipt_cron_update', 0) AS acquired",
     );
     if (!acquired) {
       if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn("[IPT] Another instance is already running — skipping this tick.");
+        console.warn(
+          "[IPT] Another instance is already running — skipping this tick.",
+        );
       }
       return;
     }
     try {
       await updateIPT(); // ✅ Run first
-      await updateAggDevicesIPT();// ✅ Run second
+      await updateAggDevicesIPT(); // ✅ Run second
     } catch (err) {
       console.error("[Main Runner] Fatal error:", err.message);
     } finally {

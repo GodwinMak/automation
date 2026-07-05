@@ -1,0 +1,230 @@
+Model Structure and Databases Involved
+Date: 2026-07-01
+
+1) Databases Involved
+
+A) Current Production Database (active in code)
+- Engine: MySQL
+- Host: localhost
+- Database name: automation_db
+- Config source: backend/Config/dbConfig.js (reads env vars)
+- Env variables used:
+  - DB_HOST
+  - DB_USERNAME
+  - DB_PASSWORD
+  - DB_NAME
+
+B) Proposed Historical Warehouse Database (recommended)
+- Engine: MySQL (on separate remote Ubuntu server)
+- Suggested database name: automation_warehouse (or any preferred name)
+- Purpose:
+  - Store historical snapshots/events from cron poll results
+  - Power long-term reporting and ML exports
+
+2) Sequelize Models Loaded in backend/Models/index.js
+
+Core network/service state models
+- devices
+- diacustomers
+- customerinfos
+- iptcustomers
+- iptcustomerinfos
+- sharedcustomers
+- sharedcustomerinfos
+- l3vpncustomers
+- l3vpncustomerinfos
+- ftthcustomers
+- ftthcustomerinfos
+- isisAdjacency
+
+History/reporting/analytics models
+- uptimehistories
+- statusChangeHistories
+- statusChangeHistoriesFtth
+- ftthReports
+- percentileReports
+- diaOverusageReports
+- pitchForUpgradeReports
+
+Configuration/operations models
+- configurationdata
+- upgradeinfos
+- switchConfiguration
+
+User/app models
+- users
+- notifications
+- favorites
+- push_tokens
+- smsCampaigns
+
+Business integration model
+- client_dbs
+
+3) Key Model Structures (polling and status domains)
+
+A) DIA
+- diacustomer
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - switchName (STRING)
+  - adminStatus (ENUM: up/down)
+  - operationalStatus (ENUM: up/down)
+  - description (STRING)
+  - destination (STRING)
+
+- customerinfo
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - nbr (STRING)
+  - port (STRING)
+  - customerName (STRING)
+  - cid (STRING)
+  - upmbps (INTEGER)
+  - downmbps (INTEGER)
+  - old_upmbps (INTEGER)
+  - old_downmbps (INTEGER)
+  - expires_at (DATE)
+  - upgrade_type (ENUM: permanent/temporary)
+
+B) IPT
+- iptcustomer
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - switchName (STRING)
+  - adminStatus (ENUM: up/down)
+  - operationalStatus (ENUM: up/down)
+  - description (STRING)
+  - destination (STRING)
+
+- iptcustomerinfo
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - nbr (STRING)
+  - port (STRING)
+  - customerName (STRING)
+  - cid (STRING)
+  - asn (STRING)
+  - upmbps (INTEGER)
+  - downmbps (INTEGER)
+
+C) Shared
+- sharedcustomer
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - switchName (STRING)
+  - adminStatus (ENUM: up/down)
+  - operationalStatus (ENUM: up/down)
+  - description (STRING)
+
+- sharedcustomerinfo
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - nbr (STRING)
+  - port (STRING)
+  - customerName (STRING)
+  - cid (STRING)
+  - capacity (INTEGER)
+
+D) L3VPN
+- l3vpncustomer
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - switchName (STRING)
+  - adminStatus (ENUM: up/down)
+  - operationalStatus (ENUM: up/down)
+  - description (STRING)
+  - destination (STRING)
+
+- l3vpncustomerinfo
+  - id (UUID, PK)
+  - interface (STRING, unique)
+  - nbr (STRING)
+  - port (STRING)
+  - customerName (STRING)
+  - cid (STRING)
+  - upmbps (INTEGER)
+  - downmbps (INTEGER)
+  - route_instance (STRING)
+
+E) FTTH
+- ftthcustomer
+  - id (UUID, PK)
+  - ip (STRING)
+  - pppoeusername (STRING, unique)
+  - ip_version (ENUM: IPv4/IPv6)
+  - status (ENUM: up/down)
+  - customerID (STRING, unique)
+  - customerName (STRING)
+  - homeNumber (STRING)
+  - topUpExpiry (DATE)
+  - isExpired (BOOLEAN)
+  - isAliveWhileExpired (BOOLEAN)
+  - isFreeCustomer (BOOLEAN)
+  - notInInfo (BOOLEAN)
+  - lastPingedAt (DATE)
+
+- ftthcustomerinfo
+  - id (UUID, PK)
+  - customerID (STRING, unique)
+  - customerName (STRING)
+  - emailAddress (STRING)
+  - homeNumber (STRING)
+  - topUpExpiry (DATE)
+  - validityPeriod (STRING)
+
+F) ISIS adjacency
+- isis_adjacency
+  - id (UUID, PK)
+  - local_device_id (UUID)
+  - neighbor_name (STRING)
+  - interface (STRING)
+  - raw_interface (STRING)
+  - metric (INTEGER)
+  - port_speed (STRING)
+  - input_bps (BIGINT)
+  - output_bps (BIGINT)
+  - level (INTEGER)
+  - state (ENUM: Up/Down)
+  - last_seen (DATE)
+  - last_checked (DATE)
+  - last_down_alert_sent (DATE)
+  - last_up_alert_sent (DATE)
+  - last_high_traffic_alert (DATE)
+  - Unique index: (local_device_id, neighbor_name, raw_interface)
+
+G) Status history tables
+- statusChangeHistories
+  - General transition history for DIA/IPT/SHARED/L3VPN/FTTH
+- statusChangeHistories_ftth
+  - FTTH-specific transition history path used by tracker
+
+4) Important Relationships (from Models/index.js)
+
+Service current-state to info
+- diacustomers 1:N customerinfos (join key: interface)
+- iptcustomers 1:N iptcustomerinfos (join key: interface)
+- sharedcustomers 1:N sharedcustomerinfos (join key: interface)
+- l3vpncustomers 1:N l3vpncustomerinfos (join key: interface)
+- ftthcustomers 1:1 ftthcustomerinfos (join key: customerID)
+
+Cross-domain links
+- customerinfos / iptcustomerinfos / sharedcustomerinfos / l3vpncustomerinfos -> client_dbs
+  - join via cid <-> network_cid
+
+Device links
+- devices 1:N switchConfiguration
+- devices 1:N isisAdjacency
+
+User links
+- users 1:N notifications
+- users 1:N favorites
+- users 1:N push_tokens
+
+5) Notes for historical forwarding design
+- Current production DB is optimized for current state (upsert/update-heavy tables).
+- Status transition history already exists for customer services.
+- ISIS currently stores mutable latest state, not a dedicated append-only history table.
+- For long-term analytics/ML, keep historical snapshots/events in a separate warehouse DB.
+
+End of file.

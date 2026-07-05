@@ -436,10 +436,11 @@ exports.uploadFTTHChurnReport = async (req, res) => {
 
       syncUpdates.push({
         id: ftthRecord.id,
-        homeNumber: ftthRecord.homeNumber || row.homeNumber,
+        homeNumber: row.homeNumber || ftthRecord.homeNumber,
         topUpExpiry: row.topUpExpiry || ftthRecord.topUpExpiry,
         isExpired,
-        isAliveWhileExpired: row.topUpExpiry ? false : undefined,
+        // Always set deterministically so churn re-uploads correctly recompute flags
+        isAliveWhileExpired: !isExpired,
       });
     }
 
@@ -452,26 +453,43 @@ exports.uploadFTTHChurnReport = async (req, res) => {
 
     // Batch update ftthcustomer records grouped by shared values to minimise queries
     // Group by (isExpired, isAliveWhileExpired) to issue as few UPDATE statements as possible
-    const updateGroups = new Map();
-    for (const u of syncUpdates) {
-      // Build a key based on the boolean flags
-      const flagKey = `${u.isExpired}:${u.isAliveWhileExpired ?? "keep"}`;
-      if (!updateGroups.has(flagKey)) {
-        updateGroups.set(flagKey, { isExpired: u.isExpired, isAliveWhileExpired: u.isAliveWhileExpired, ids: [] });
-      }
-      updateGroups.get(flagKey).ids.push(u.id);
-    }
-    // Issue one UPDATE per distinct flag combination
-    await Promise.all(
-      Array.from(updateGroups.values()).map((group) => {
-        const updateFields = { isExpired: group.isExpired };
-        if (group.isAliveWhileExpired !== undefined) {
-          updateFields.isAliveWhileExpired = group.isAliveWhileExpired;
-        }
-        return FTTHCustomer.update(updateFields, { where: { id: group.ids } });
-      })
-    );
+    // const updateGroups = new Map();
+    // for (const u of syncUpdates) {
+    //   // Build a key based on the boolean flags
+    //   const flagKey = `${u.isExpired}:${u.isAliveWhileExpired ?? "keep"}`;
+    //   if (!updateGroups.has(flagKey)) {
+    //     updateGroups.set(flagKey, { isExpired: u.isExpired, isAliveWhileExpired: u.isAliveWhileExpired, ids: [] });
+    //   }
+    //   updateGroups.get(flagKey).ids.push(u.id);
+    // }
+    // // Issue one UPDATE per distinct flag combination
+    // await Promise.all(
+    //   Array.from(updateGroups.values()).map((group) => {
+    //     const updateFields = { isExpired: group.isExpired };
+    //     if (group.isAliveWhileExpired !== undefined) {
+    //       updateFields.isAliveWhileExpired = group.isAliveWhileExpired;
+    //     }
+    //     return FTTHCustomer.update(updateFields, { where: { id: group.ids } });
+    //   })
+    // );
 
+    const BATCH_SIZE = 200;
+    for (let i = 0; i < syncUpdates.length; i += BATCH_SIZE) {
+      const batch = syncUpdates.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map((u) =>
+          FTTHCustomer.update(
+            {
+              homeNumber: u.homeNumber,
+              topUpExpiry: u.topUpExpiry,
+              isExpired: u.isExpired,
+              isAliveWhileExpired: u.isAliveWhileExpired,
+            },
+            { where: { id: u.id } }
+          )
+        )
+      );
+    }
     // --- 4. Flag ftthcustomer records not present in ftthcustomerinfo ---
     const allInfoCustomerIDs = new Set(
       (await FTTHCustomerInfo.findAll({ attributes: ["customerID"] })).map((r) => r.customerID)

@@ -53,6 +53,26 @@ import CustomerMLAnalysis from "@/components/CustomerMLAnalysis";
 const ViewDiaCutomer = () => {
   const navigate = useNavigate();
 
+  const formatRemainingTime = (expiresAt: string | undefined) => {
+    if (!expiresAt) return "No expiry";
+
+    const now = new Date();
+    const expiry = new Date(expiresAt);
+    if (isNaN(expiry.getTime())) return "Invalid expiry";
+
+    const diffMs = expiry.getTime() - now.getTime();
+    if (diffMs <= 0) return "Expired";
+
+    const totalMinutes = Math.floor(diffMs / (1000 * 60));
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const minutes = totalMinutes % 60;
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
   // Diagnosis Modal State and Handler (must be inside component)
   const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -965,6 +985,11 @@ const ViewDiaCutomer = () => {
           <p className="text-muted-foreground">
             Circuit ID: {customerData.cid}
           </p>
+          {customer?.upgrade_type === "temporary" && (
+            <p className="text-amber-600 font-medium mt-1">
+              Temporary Upgrade Remaining: {formatRemainingTime(customer?.expires_at)}
+            </p>
+          )}
         </div>
         <CustomerInfo data={customer} />
 

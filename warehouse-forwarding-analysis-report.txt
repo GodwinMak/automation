@@ -1,0 +1,337 @@
+Network Monitoring Historical Forwarding Assessment
+Date: 2026-07-01
+
+Scope Reviewed
+- Cron jobs:
+  - backend/cron/updateDIA.js
+  - backend/cron/updateIPT.js
+  - backend/cron/updateShared.js
+  - backend/cron/updateL3VPN.js
+  - backend/cron/updateFTTH.js
+  - backend/cron/isisAdjacent.js
+- Models:
+  - backend/Models/diaCustomer.js
+  - backend/Models/customerinfo.js
+  - backend/Models/iptCustomer.js
+  - backend/Models/iptcustomerinfo.js
+  - backend/Models/sharedCustomer.js
+  - backend/Models/sharedCustomerinfo.js
+  - backend/Models/L3VPNCustomer.js
+  - backend/Models/L3VPNCustomerinfo.js
+  - backend/Models/FTTHCustomer.js
+  - backend/Models/ftthcustomerinfo.js
+  - backend/Models/isisAdjacent.js
+  - backend/Models/statusChangeHistory.js
+  - backend/Models/statusChangeHistoryFtth.js
+  - backend/Models/index.js
+- Related utility:
+  - backend/utils/statusTracker.js
+- Relevant controllers reviewed for write behavior:
+  - backend/Controller/customer.js
+  - backend/Controller/iptcustomer.js
+  - backend/Controller/sharedcustomer.js
+  - backend/Controller/l3vpncustomer.js
+  - backend/Controller/ftthcustomer.js
+  - backend/Controller/isisAdjacent.js
+
+Findings
+
+1) Where each cron writes to MySQL
+
+A) DIA (backend/cron/updateDIA.js)
+- Current-state writes:
+  - db.diacustomers.bulkCreate(..., updateOnDuplicate: [adminStatus, operationalStatus, description, switchName])
+  - db.customerinfos.bulkCreate(..., updateOnDuplicate: [nbr, port, customerName])
+  - enrichment updates through bulkCreate updateOnDuplicate for destination, cid, upmbps, downmbps
+  - db.devices.upsert(...) and db.customerinfos.update(...) in AGG update step
+- Locking:
+  - GET_LOCK('dia_cron_update', 0)
+
+B) IPT (backend/cron/updateIPT.js)
+- Current-state writes:
+  - db.iptcustomers.bulkCreate(..., updateOnDuplicate: [adminStatus, operationalStatus, description, switchName])
+  - db.iptcustomerinfos.bulkCreate(..., updateOnDuplicate: [nbr, port, customerName])
+  - enrichment updates for destination, cid, asn, upmbps, downmbps via bulkCreate updateOnDuplicate
+  - db.devices.upsert(...) and db.iptcustomerinfos.update(...) in AGG update step
+- Locking:
+  - GET_LOCK('ipt_cron_update', 0)
+
+C) Shared (backend/cron/updateShared.js)
+- Current-state writes:
+  - db.sharedcustomers.bulkCreate(..., updateOnDuplicate: [adminStatus, operationalStatus, description, switchName])
+  - db.sharedcustomerinfos.bulkCreate(..., updateOnDuplicate: [nbr, port, customerName, capacity])
+  - CID enrichment update via bulkCreate updateOnDuplicate
+- Locking:
+  - GET_LOCK('shared_cron_update', 0)
+
+D) L3VPN (backend/cron/updateL3VPN.js)
+- Current-state writes:
+  - db.l3vpncustomers.bulkCreate(..., updateOnDuplicate: [adminStatus, operationalStatus, description, switchName])
+  - db.l3vpncustomerinfos.bulkCreate(..., updateOnDuplicate: [nbr, port, customerName])
+  - enrichment updates for destination, cid, route_instance, upmbps, downmbps via bulkCreate updateOnDuplicate
+- Locking:
+  - GET_LOCK('l3vpn_cron_update', 0)
+
+E) FTTH (backend/cron/updateFTTH.js)
+- Current-state writes:
+  - db.ftthcustomers.bulkCreate(upRecords, updateOnDuplicate: [ip, ip_version, status, updatedAt])
+  - db.ftthcustomers.update({status: 'down'}, where updatedAt < runStart)
+- Locking:
+  - GET_LOCK('ftth_cron_update', 0)
+
+F) ISIS Adjacency (backend/cron/isisAdjacent.js)
+- Current-state writes:
+  - db.isisAdjacency.upsert(...) for current up adjacencies
+  - db.isisAdjacency.update(...) to mark missing links down and update alert timestamps
+- Locking:
+  - GET_LOCK('isis_adjacent_cron', 0)
+
+2) Exact shape of data being written (fields/types)
+
+A) DIA service models
+- diacustomer
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - switchName: STRING
+  - adminStatus: ENUM('up','down')
+  - operationalStatus: ENUM('up','down')
+  - description: STRING
+  - destination: STRING
+- customerinfo
+  - id: UUID (PK)
+  - interface: STRING (unique, FK-like linkage to diacustomers.interface)
+  - nbr: STRING
+  - port: STRING
+  - customerName: STRING
+  - cid: STRING
+  - upmbps: INTEGER
+  - downmbps: INTEGER
+  - old_upmbps: INTEGER
+  - old_downmbps: INTEGER
+  - expires_at: DATE
+  - upgrade_type: ENUM('permanent','temporary')
+
+B) IPT service models
+- iptcustomer
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - switchName: STRING
+  - adminStatus: ENUM('up','down')
+  - operationalStatus: ENUM('up','down')
+  - description: STRING
+  - destination: STRING
+- iptcustomerinfo
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - nbr: STRING
+  - port: STRING
+  - customerName: STRING
+  - cid: STRING
+  - asn: STRING
+  - upmbps: INTEGER
+  - downmbps: INTEGER
+
+C) Shared service models
+- sharedcustomer
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - switchName: STRING
+  - adminStatus: ENUM('up','down')
+  - operationalStatus: ENUM('up','down')
+  - description: STRING
+- sharedcustomerinfo
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - nbr: STRING
+  - port: STRING
+  - customerName: STRING
+  - cid: STRING
+  - capacity: INTEGER
+
+D) L3VPN service models
+- l3vpncustomer
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - switchName: STRING
+  - adminStatus: ENUM('up','down')
+  - operationalStatus: ENUM('up','down')
+  - description: STRING
+  - destination: STRING
+- l3vpncustomerinfo
+  - id: UUID (PK)
+  - interface: STRING (unique)
+  - nbr: STRING
+  - port: STRING
+  - customerName: STRING
+  - cid: STRING
+  - upmbps: INTEGER
+  - downmbps: INTEGER
+  - route_instance: STRING
+
+E) FTTH service model
+- ftthcustomer
+  - id: UUID (PK)
+  - ip: STRING
+  - pppoeusername: STRING (unique)
+  - ip_version: ENUM('IPv4','IPv6')
+  - status: ENUM('up','down')
+  - customerID: STRING (unique)
+  - customerName: STRING
+  - homeNumber: STRING
+  - topUpExpiry: DATE
+  - isExpired: BOOLEAN
+  - isAliveWhileExpired: BOOLEAN
+  - isFreeCustomer: BOOLEAN
+  - notInInfo: BOOLEAN
+  - lastPingedAt: DATE
+
+F) ISIS adjacency model
+- isis_adjacency
+  - id: UUID (PK)
+  - local_device_id: UUID
+  - neighbor_name: STRING
+  - interface: STRING
+  - raw_interface: STRING
+  - metric: INTEGER
+  - port_speed: STRING
+  - input_bps: BIGINT
+  - output_bps: BIGINT
+  - level: INTEGER
+  - state: ENUM('Up','Down')
+  - last_seen: DATE
+  - last_checked: DATE
+  - last_down_alert_sent: DATE
+  - last_up_alert_sent: DATE
+  - last_high_traffic_alert: DATE
+  - unique index: (local_device_id, neighbor_name, raw_interface)
+
+3) Overwrite-only vs history existing today
+
+A) Overwrite/current-state behavior confirmed
+- DIA/IPT/Shared/L3VPN/FTTH/ISIS primary tables are maintained as current state via upsert/update patterns.
+
+B) Existing history already present
+- There is already transition history for customer services via statusTracker:
+  - statusChangeHistories (DIA, IPT, SHARED, L3VPN, FTTH enum values)
+  - statusChangeHistories_ftth (FTTH specific storage path in tracker)
+- statusTracker writes append-only records when status transitions are detected.
+- ISIS does not have a dedicated append-only history table; it updates current rows and timestamps.
+
+4) Least invasive tap-point for forwarding
+
+Recommended tap-point:
+- Immediately after successful current-state DB writes in each cron run, enqueue an event payload to a local non-blocking spool.
+- This avoids extra SELECT queries and avoids network waits in the cron execution path.
+
+Per-job practical tap locations:
+- updateDIA: after bulk upsert of diacustomers, optionally also after key enrichment updates.
+- updateIPT: after bulk upsert of iptcustomers.
+- updateShared: after bulk upsert of sharedcustomers.
+- updateL3VPN: after bulk upsert of l3vpncustomers.
+- updateFTTH: after upsert + down-mark block completes.
+- isisAdjacent: after per-device DB update cycle completes (prefer batched event payload, not per-row remote push).
+
+5) Delivery mechanism options with tradeoffs
+
+Option 1: Fire-and-forget async HTTP push from cron
+- Pros:
+  - Fast to implement.
+  - Minimal architecture changes.
+- Cons:
+  - Still performs network and socket work in cron process.
+  - Harder delivery guarantees.
+  - Risk of noisy failures under network instability.
+
+Option 2: Local durable queue/spool + separate forwarder worker (recommended)
+- Pros:
+  - Cron path does minimal local append and returns immediately.
+  - Remote outages do not block/fail cron.
+  - Retries/backoff happen outside cron process.
+  - Good operational control (batch size, retry rate, backpressure).
+- Cons:
+  - Requires one additional worker process and local spool management.
+
+Option 3: Pull-based scheduled batch export (delta reads)
+- Pros:
+  - Very low per-poll overhead.
+  - No per-event remote call from cron path.
+- Cons:
+  - Adds periodic read load on production MySQL.
+  - Requires robust watermark logic.
+  - Can miss transient states if not captured in source history.
+
+Option 4: MySQL binlog CDC/replication
+- Pros:
+  - Comprehensive change capture with low app code changes.
+- Cons:
+  - Higher operational complexity.
+  - Requires binlog setup, retention, and CDC tooling.
+
+6) Recommendation for your constraints
+
+Best-fit recommendation:
+- Use Option 2 (local durable spool + independent forwarder worker).
+
+Reason this best matches your goals:
+- Cron jobs never wait on remote warehouse network.
+- Network hiccups cannot cause cron failure or retry storms in main process.
+- CPU and memory overhead in cron remains near-zero.
+- Retries/backoff are isolated in a dedicated worker.
+
+7) Proposed implementation approach (safe, lowest overhead)
+
+A) Producer side on production server
+- Add a tiny enqueue utility called by cron jobs:
+  - Accepts service_type, poll_timestamp, and payload array/object.
+  - Appends NDJSON line(s) to local spool file.
+  - Catches errors and logs warning only; never throws to cron flow.
+
+B) Forwarder worker (separate process)
+- Reads spool file in batches.
+- Sends batches to remote ingest endpoint.
+- Uses exponential backoff + jitter on failures.
+- Tracks checkpoint/offset to avoid duplicates as much as possible.
+- Writes health metrics/logs:
+  - queued_count
+  - send_success/send_fail
+  - oldest_pending_age
+  - backoff_seconds
+
+C) Logging and safety
+- Add explicit non-fatal logging in producer and forwarder.
+- Ensure enqueue failures are visible but non-blocking.
+- Enforce queue size cap and rollover policy to prevent disk growth.
+
+8) Remote Ubuntu ingestion service design (minimal)
+
+Option A: Node.js + Express ingest API (recommended)
+- Endpoint:
+  - POST /ingest/network-poll (batch payload)
+- Responsibilities:
+  - Validate auth token and payload schema.
+  - Bulk insert into warehouse table(s).
+  - Return ack with inserted count.
+
+Warehouse storage choices:
+- Table design A (simple): one wide event table with payload_json
+  - Columns: id, service_type, poll_ts, source_host, record_key, payload_json, ingested_at
+- Table design B (normalized): per-service history tables
+
+Partitioning suggestion (MySQL):
+- Partition by poll timestamp range (monthly partitions), e.g. RANGE on TO_DAYS(poll_ts).
+
+Option B: File-drop + importer
+- Accept gzipped NDJSON files by SFTP or mounted path.
+- Separate importer loads to MySQL or writes Parquet/CSV.
+
+9) ML-oriented export path
+- Keep raw event history in warehouse MySQL.
+- Run scheduled export job (hourly/daily) to produce Parquet/CSV by date/service.
+- Store in object storage or local data lake path for model training pipelines.
+
+10) Additional notes observed
+- statusTracker already persists valuable transition history for customer services.
+- If full poll snapshots are required (not only transitions), forwarding should capture current-state records from cron output payloads each run.
+- Controllers are mostly read/query layers and not ideal tap points for polling history forwarding.
+
+End of report.

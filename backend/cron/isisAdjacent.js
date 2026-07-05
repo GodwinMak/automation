@@ -2,6 +2,7 @@ const cron = require("node-cron");
 const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op } = require("sequelize");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 const { sendSms } = require("../utils/sms");
 const sendPushNotification = require("../utils/sendPushNotification");
@@ -137,6 +138,7 @@ module.exports = (io, options = {}) => {
     });
 
     const timestamp = new Date();
+    const runAdjacencyMap = new Map();
 
     for (const device of devices) {
       try {
@@ -210,6 +212,20 @@ module.exports = (io, options = {}) => {
             input_bps: ifaceStats.input_bps || null,
             output_bps: ifaceStats.output_bps || null,
           });
+
+          const recordKey = `${device.id}:${adj.neighbor_name}:${adj.raw_interface}`;
+          runAdjacencyMap.set(recordKey, {
+            local_device_id: device.id,
+            neighbor_name: adj.neighbor_name,
+            interface: adj.interface,
+            raw_interface: adj.raw_interface,
+            metric,
+            port_speed: ifaceStats.speed || null,
+            input_bps: ifaceStats.input_bps || null,
+            output_bps: ifaceStats.output_bps || null,
+            level: adj.level,
+            state: "Up",
+          });
         }
 
         // --- 6. Mark missing links as Down ---
@@ -223,6 +239,20 @@ module.exports = (io, options = {}) => {
               } 
             }
           );
+
+          const recordKey = `${failure.local_device_id}:${failure.neighbor_name}:${failure.raw_interface}`;
+          runAdjacencyMap.set(recordKey, {
+            local_device_id: failure.local_device_id,
+            neighbor_name: failure.neighbor_name,
+            interface: failure.interface,
+            raw_interface: failure.raw_interface,
+            metric: failure.metric || null,
+            port_speed: failure.port_speed || null,
+            input_bps: failure.input_bps || null,
+            output_bps: failure.output_bps || null,
+            level: failure.level,
+            state: "Down",
+          });
         }
 
         // --- 7. Detect recoveries (only for links that were previously marked Down) ---
@@ -272,7 +302,7 @@ module.exports = (io, options = {}) => {
           }
         }
 
-        // --- 10. High Traffic alerts (for Up links, utilisation >80%, cooldown 2h) ---
+        // --- 10. High Traffic alerts (for Up links, utilisation >85%, cooldown 2h) ---
         const now = new Date();
         const highTrafficLinks = await IsisAdjacency.findAll({
           where: {
@@ -286,10 +316,10 @@ module.exports = (io, options = {}) => {
 
         for (const link of highTrafficLinks) {
           const util = computeUtilization(link.input_bps, link.output_bps, link.port_speed);
-          if (util && util > 80) {
+          if (util && util > 85) {
             const lastAlert = link.last_high_traffic_alert;
             if (!lastAlert || (now - new Date(lastAlert)) > 2 * 60 * 60 * 1000) {
-              const message = `HIGH TRAFFIC: ${device.name} > ${link.neighbor_name} | ${link.interface} | Utilisation ${util.toFixed(1)}% (>80%) | Speed: ${link.port_speed} Mbps`;
+              const message = `HIGH TRAFFIC: ${device.name} > ${link.neighbor_name} | ${link.interface} | Utilisation ${util.toFixed(1)}% (>85%) | Speed: ${link.port_speed} Mbps`;
               await sendSms(message);
               await IsisAdjacency.update(
                 { last_high_traffic_alert: now },
@@ -307,6 +337,26 @@ module.exports = (io, options = {}) => {
         console.error(`[ISIS] ✗ ${device.ip}: ${err.message}`);
       }
     }
+
+    const mergedRecords = Array.from(runAdjacencyMap.values()).map((a) => ({
+      record_key: `${a.local_device_id}:${a.neighbor_name}:${a.raw_interface}`,
+      cid: null,
+      poll_ts: new Date(),
+      payload: {
+        local_device_id: a.local_device_id,
+        neighbor_name: a.neighbor_name,
+        interface: a.interface,
+        raw_interface: a.raw_interface,
+        metric: a.metric,
+        port_speed: a.port_speed,
+        input_bps: a.input_bps,
+        output_bps: a.output_bps,
+        level: a.level,
+        state: a.state,
+      },
+    }));
+    enqueueBatch("ISIS", mergedRecords);
+
     } finally {
       await db.sequelize.query("SELECT RELEASE_LOCK('isis_adjacent_cron')");
     }

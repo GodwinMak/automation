@@ -100,6 +100,7 @@ const l3vpnCustomerRoutes = require("./routes/l3vpncustomer");
 const ftthCustomerRoutes = require("./routes/ftthcustomer");
 const ftthReportRoutes = require("./routes/ftthReport");
 const smsRoutes = require("./routes/sms");
+const clearPppoeSessionRoutes = require("./routes/clearpppoesession");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
@@ -130,6 +131,7 @@ app.use("/l3vpncustomers", l3vpnCustomerRoutes);
 app.use("/ftthcustomers", ftthCustomerRoutes);
 app.use("/ftth-reports", ftthReportRoutes);
 app.use("/sms", smsRoutes);
+app.use("/clear-pppoe-session", clearPppoeSessionRoutes);
 
 
 const { setUserSockets } = require("./emitNotificationToUser");

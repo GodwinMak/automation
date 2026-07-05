@@ -7,6 +7,7 @@ const {
   trackStatusChanges,
   getDiaCustomerInfoMap,
 } = require("../utils/statusTracker");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -14,7 +15,7 @@ module.exports = (io, options = {}) => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
     password: process.env.SSH_PASSWORD,
-    readyTimeout: 15000,      // fail fast if switch is unreachable
+    readyTimeout: 15000, // fail fast if switch is unreachable
     keepaliveInterval: 10000, // detect dead sockets
     keepaliveCountMax: 2,
   };
@@ -249,7 +250,6 @@ module.exports = (io, options = {}) => {
       } else if (direction.toLowerCase().includes("output")) {
         entry.downmbps = mbps; // output-policer → downmbps
       }
-
     }
 
     console.log(
@@ -753,6 +753,44 @@ module.exports = (io, options = {}) => {
       await fetchInterfaceCid();
       // === Step 6: Update bandwidths via policers ===
       await updateBandwidths();
+
+      // === Step 7: Warehouse tap — now runs AFTER all enrichment is complete ===
+      const interfaceNames = allInterfaces.map((d) => d.interface);
+
+      const [freshDiaRows, freshInfoRows] = await Promise.all([
+        diacustomer.findAll({ where: { interface: interfaceNames } }),
+        customerinfo.findAll({ where: { interface: interfaceNames } }),
+      ]);
+
+      const infoByInterface = new Map(
+        freshInfoRows.map((i) => [i.interface, i.toJSON()]),
+      );
+
+      const mergedRecords = freshDiaRows.map((d) => {
+        const dia = d.toJSON();
+        const info = infoByInterface.get(dia.interface) || {};
+        return {
+          record_key: dia.interface,
+          cid: info.cid || null,
+          poll_ts: new Date(),
+          payload: {
+            interface: dia.interface,
+            switchName: dia.switchName,
+            adminStatus: dia.adminStatus,
+            operationalStatus: dia.operationalStatus,
+            description: dia.description,
+            destination: dia.destination,
+            nbr: info.nbr || null,
+            port: info.port || null,
+            customerName: info.customerName || null,
+            cid: info.cid || null,
+            upmbps: info.upmbps || null,
+            downmbps: info.downmbps || null,
+          },
+        };
+      });
+
+      enqueueBatch("DIA", mergedRecords);
     } catch (err) {
       console.error("[DIA Updater] Fatal error:", err.message);
     }
@@ -908,11 +946,13 @@ module.exports = (io, options = {}) => {
 
   const runAll = async () => {
     const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('dia_cron_update', 0) AS acquired"
+      "SELECT GET_LOCK('dia_cron_update', 0) AS acquired",
     );
     if (!acquired) {
       if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn("[DIA] Another instance is already running — skipping this tick.");
+        console.warn(
+          "[DIA] Another instance is already running — skipping this tick.",
+        );
       }
       return;
     }

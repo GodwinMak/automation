@@ -2,7 +2,11 @@ const cron = require("node-cron");
 const { Client } = require("ssh2");
 const db = require("../Models");
 const { Op, literal } = require("sequelize");
-const { trackStatusChanges, getL3vpnCustomerInfoMap } = require("../utils/statusTracker");
+const {
+  trackStatusChanges,
+  getL3vpnCustomerInfoMap,
+} = require("../utils/statusTracker");
+const { enqueueBatch } = require("../utils/warehouseSpool");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -514,12 +518,14 @@ module.exports = (io, options = {}) => {
     }
   };
 
-
   const parseRouteInstances = (output) => {
     if (!output) return new Map();
 
     const map = new Map();
-    const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
 
     // Matches: set routing-instances IM-BANK interface ps1256.1256
     const regex = /^set routing-instances (\S+) interface (\S+)$/i;
@@ -594,7 +600,9 @@ module.exports = (io, options = {}) => {
         `[RouteInstanceUpdater] ✅ Updated ${updates.length} records with route instances.`,
       );
     } else {
-      console.log(`[RouteInstanceUpdater] ℹ️ No new route instances to update.`);
+      console.log(
+        `[RouteInstanceUpdater] ℹ️ No new route instances to update.`,
+      );
     }
   };
   // === MAIN UPDATER FUNCTION ===
@@ -657,17 +665,54 @@ module.exports = (io, options = {}) => {
       await fetchInterfaceRouteInstances();
       // === Step 7: Update bandwidths via policers ===
       await updateBandwidths();
+
+      // === Step 8: Warehouse tap ===
+      const interfaceNames = allInterfaces.map((d) => d.interface);
+      const [freshL3vpnRows, freshInfoRows] = await Promise.all([
+        l3vpncustomer.findAll({ where: { interface: interfaceNames } }),
+        l3vpncustomerinfo.findAll({ where: { interface: interfaceNames } }),
+      ]);
+      const infoByInterface = new Map(
+        freshInfoRows.map((i) => [i.interface, i.toJSON()]),
+      );
+      const mergedRecords = freshL3vpnRows.map((d) => {
+        const l3vpn = d.toJSON();
+        const info = infoByInterface.get(l3vpn.interface) || {};
+        return {
+          record_key: l3vpn.interface,
+          cid: info.cid || null,
+          poll_ts: new Date(),
+          payload: {
+            interface: l3vpn.interface,
+            switchName: l3vpn.switchName,
+            adminStatus: l3vpn.adminStatus,
+            operationalStatus: l3vpn.operationalStatus,
+            description: l3vpn.description,
+            destination: l3vpn.destination,
+            nbr: info.nbr || null,
+            port: info.port || null,
+            customerName: info.customerName || null,
+            cid: info.cid || null,
+            upmbps: info.upmbps || null,
+            downmbps: info.downmbps || null,
+            route_instance: info.route_instance || null,
+          },
+        };
+      });
+      enqueueBatch("L3VPN", mergedRecords);
     } catch (error) {
       console.error("[L3VPN Updater] ❌ Error in updateL3VPN:", error.message);
     }
   };
   const runAll = async () => {
     const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('l3vpn_cron_update', 0) AS acquired"
+      "SELECT GET_LOCK('l3vpn_cron_update', 0) AS acquired",
     );
     if (!acquired) {
       if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn("[L3VPN] Another instance is already running — skipping this tick.");
+        console.warn(
+          "[L3VPN] Another instance is already running — skipping this tick.",
+        );
       }
       return;
     }
