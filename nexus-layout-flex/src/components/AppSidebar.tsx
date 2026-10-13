@@ -26,6 +26,12 @@ import {
   Activity,
   Layers,
   MessageSquare,
+  Cable,
+  Send,
+  Mail,
+  Network,
+  Waypoints,
+  History,
 } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -46,13 +52,14 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useAuthContext } from "@/hooks/useAuthContext";
-import { Permissions } from "@/Context/AuthContext";
+import { Permissions, UserFlag } from "@/Context/AuthContext";
 
 type NavigationItem = {
   title: string;
   url?: string;
   icon: any;
   permission?: keyof Permissions;
+  flag?: UserFlag;
   adminOnly?: boolean;
   children?: NavigationItem[];
 };
@@ -64,22 +71,43 @@ const allNavigationItems: NavigationItem[] = [
     icon: Home,
   },
   {
-    title: "Switches",
-    url: "/switches",
+    title: "Switch",
+    children: [
+      { title: "Switches", url: "/switches", icon: Users },
+      { title: "Switch Map", url: "/switch-map", icon: MapPin },
+      {
+        title: "ISIS Impact",
+        url: "/isis-impact",
+        icon: Activity,
+        permission: "canViewUptimeTrends",
+      },
+      {
+        title: "Network Maps",
+        url: "/network-maps",
+        icon: Waypoints,
+      },
+      {
+        title: "Capacity",
+        url: "/capacity",
+        icon: Gauge,
+        permission: "canViewCapacity",
+      },
+      {
+        title: "Power Level",
+        url: "/optical-power",
+        icon: TrendingDown,
+        permission: "canViewChurnAnalysis",
+      },
+      {
+        title: "Ping Monitor",
+        url: "/ping-monitor",
+        icon: Activity,
+        permission: "canViewUptimeTrends",
+      },
+    ],
     icon: Users,
   },
-  {
-    title: "Switch Map",
-    url: "/switch-map",
-    icon: MapPin,
-  },
-  {
-    title: "ISIS Impact",
-    url: "/isis-impact",
-    icon: Activity,
-    permission: "canViewUptimeTrends",
 
-  },
   {
     title: "Customers",
     children: [
@@ -87,7 +115,9 @@ const allNavigationItems: NavigationItem[] = [
       { title: "IPT Customers", url: "/ipt-customer", icon: TrendingUp },
       { title: "Shared Customers", url: "/shared-customer", icon: Share2 },
       { title: "L3VPN Customers", url: "/l3vpn-customer", icon: Layers },
+      { title: "L2VPN Circuits", url: "/l2vpn-circuits", icon: Network },
       { title: "FTTH Customers", url: "/ftth-customer", icon: Wifi },
+      { title: "High Profile Customers", url: "/high-profile-customers", icon: Star },
     ],
     icon: User,
   },
@@ -107,6 +137,12 @@ const allNavigationItems: NavigationItem[] = [
         permission: "canConfigureCustomers",
       },
       {
+        title: "GPON Over Enterprise",
+        url: "/gpon-over-enterprise",
+        icon: MonitorCog,
+        permission: "canConfigureCustomers",
+      },
+      {
         title: "Switch Configs",
         url: "/switch-configurations",
         icon: FileText,
@@ -117,39 +153,38 @@ const allNavigationItems: NavigationItem[] = [
     permission: "canConfigureCustomers",
   },
   {
-    title: "Capacity",
-    url: "/capacity",
-    icon: Gauge,
-    permission: "canViewCapacity",
+    title: "Outage Analysis",
+    children: [
+      {
+        title: "Uptime Trends",
+        url: "/uptime-trends",
+        icon: LineChart,
+        permission: "canViewUptimeTrends",
+      },
+      {
+        title: "Churn Analysis",
+        url: "/churn-analysis",
+        icon: TrendingDown,
+        permission: "canViewChurnAnalysis",
+      },
+      {
+        title: "Outage  Incidents",
+        url: "/outage-incidents",
+        icon: Cable,
+        permission: "canViewChurnAnalysis",
+      },
+    ],
+    icon: BarChart3,
+    permission: "canViewChurnAnalysis",
   },
-  {
-    title: "DIA Over-Usage",
-    url: "/dia-overusage-report",
-    icon: AlertTriangle,
-    permission: "canViewCapacity",
-  },
-  {
-    title: "Pitch For Upgrade",
-    url: "/pitch-for-upgrade",
-    icon: FileSpreadsheet,
-    permission: "canViewCapacity",
-  },
+  // { title: "SMS Broadcast", url: "/sms-broadcast", icon: MessageSquare },
+  { title: "SMS Broadcast", url: "/sms-broadcast", icon: Send },
+  { title: "Email Broadcast", url: "/email-broadcast", icon: Mail },
+
   {
     title: "Watchlist",
     url: "/watchlist",
     icon: Star,
-  },
-  {
-    title: "Uptime Trends",
-    url: "/uptime-trends",
-    icon: LineChart,
-    permission: "canViewUptimeTrends",
-  },
-  {
-    title: "Churn Analysis",
-    url: "/churn-analysis",
-    icon: TrendingDown,
-    permission: "canViewChurnAnalysis",
   },
   {
     title: "95th Report",
@@ -162,8 +197,36 @@ const allNavigationItems: NavigationItem[] = [
     icon: BarChart3,
     permission: "canView95thReport",
   },
+  {
+    title: "DIA REPORTS",
+    children: [
+      {
+        title: "DIA Over-Usage",
+        url: "/dia-overusage-report",
+        icon: AlertTriangle,
+      },
+      {
+        title: "Pitch For Upgrade",
+        url: "/pitch-for-upgrade",
+        icon: FileSpreadsheet,
+      },
+    ],
+    icon: FileSpreadsheet,
+    permission: "canViewChurnAnalysis",
+  },
   { title: "FTTH Reports", url: "/ftth-reports", icon: FileText },
-  { title: "SMS Broadcast", url: "/sms-broadcast", icon: MessageSquare },
+  {
+    title: "Upgrade History",
+    url: "/upgrade-history",
+    icon: History,
+    permission: "canUpgradeCustomers",
+  },
+  {
+    title: "Process Monitoring",
+    url: "/process-monitoring",
+    icon: Activity,
+    flag: "canViewProcessMonitoring",
+  },
   {
     title: "User Management",
     url: "/user-management",
@@ -191,7 +254,7 @@ export function AppSidebar() {
   const currentPath = location.pathname;
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { state: authState, logout, hasPermission, isAdmin } = useAuthContext();
+  const { state: authState, logout, hasPermission, hasFlag, isAdmin } = useAuthContext();
 
   // Filter navigation items based on permissions
   const navigationItems = useMemo(() => {
@@ -204,6 +267,10 @@ export function AppSidebar() {
           }
           // Check permission
           if (item.permission && !hasPermission(item.permission)) {
+            return false;
+          }
+          // Check individually-granted flag
+          if (item.flag && !hasFlag(item.flag)) {
             return false;
           }
           return true;
@@ -224,7 +291,7 @@ export function AppSidebar() {
     };
 
     return filterItems(allNavigationItems);
-  }, [authState.userData, hasPermission, isAdmin]);
+  }, [authState.userData, hasPermission, hasFlag, isAdmin]);
 
   const handleLogout = () => {
     logout();
@@ -336,7 +403,10 @@ export function AppSidebar() {
                     >
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
-                          className={getNavClassName(undefined, isParentActive(item))}
+                          className={getNavClassName(
+                            undefined,
+                            isParentActive(item),
+                          )}
                         >
                           <item.icon className="h-4 w-4" />
                           {sidebarState === "expanded" && (
@@ -375,9 +445,14 @@ export function AppSidebar() {
                     </Collapsible>
                   ) : (
                     <SidebarMenuButton asChild>
-                      <NavLink to={item.url!} className={getNavClassName(item.url)}>
+                      <NavLink
+                        to={item.url!}
+                        className={getNavClassName(item.url)}
+                      >
                         <item.icon className="h-4 w-4" />
-                        {sidebarState === "expanded" && <span>{item.title}</span>}
+                        {sidebarState === "expanded" && (
+                          <span>{item.title}</span>
+                        )}
                       </NavLink>
                     </SidebarMenuButton>
                   )}
@@ -406,9 +481,14 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   ) : (
                     <SidebarMenuButton asChild>
-                      <NavLink to={item.url!} className={getNavClassName(item.url)}>
+                      <NavLink
+                        to={item.url!}
+                        className={getNavClassName(item.url)}
+                      >
                         <item.icon className="h-4 w-4" />
-                        {sidebarState === "expanded" && <span>{item.title}</span>}
+                        {sidebarState === "expanded" && (
+                          <span>{item.title}</span>
+                        )}
                       </NavLink>
                     </SidebarMenuButton>
                   )}

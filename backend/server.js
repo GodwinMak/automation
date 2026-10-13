@@ -77,6 +77,8 @@ const io = new Server(server, { cors: { origin: (origin, cb) => cb(null, origin 
 
 const deviceRoutes = require("./routes/device");
 const upgradeRoutes = require("./routes/upgrade");
+const iptUpgradeRoutes = require("./routes/iptUpgrade");
+const l3vpnUpgradeRoutes = require("./routes/l3vpnUpgrade");
 const statusRoutes = require("./routes/status");
 const customerRoutes = require("./routes/customer");
 const iptCustomerRoutes = require("./routes/iptcustomer");
@@ -95,15 +97,28 @@ const diaOverusageRoutes = require("./routes/diaOverusage");
 const pitchForUpgradeRoutes = require("./routes/pitchForUpgrade");
 const switchConfigurationRoutes = require("./routes/switchConfiguration");
 const isisAdjacentRoutes = require("./routes/isisAdjacent");
+const isisWatchlistRoutes = require("./routes/isisWatchlist");
 const pushTokenRoutes = require("./routes/pushToken");
 const l3vpnCustomerRoutes = require("./routes/l3vpncustomer");
 const ftthCustomerRoutes = require("./routes/ftthcustomer");
 const ftthReportRoutes = require("./routes/ftthReport");
 const smsRoutes = require("./routes/sms");
+const smsBroadcastV2Routes = require("./routes/smsBroadcastV2");
+const emailRoutes = require("./routes/email");
+const emailBroadcastV2Routes = require("./routes/emailBroadcastV2");
 const clearPppoeSessionRoutes = require("./routes/clearpppoesession");
+const opticsPowerRoutes = require("./routes/Opticspowercontroller.js");
+const fiberCutIncidentRoutes = require("./routes/fiberCutIncidents");
+const highProfileCustomerRoutes = require("./routes/highProfileCustomer");
+const processMonitoringRoutes = require("./routes/processMonitoring");
+const l2vpnCircuitRoutes = require("./routes/l2vpnCircuit");
+const weathermapRoutes = require("./routes/weathermap");
+const networkMapRoutes = require("./routes/networkMap");
 
 app.use("/devices", deviceRoutes);
 app.use("/upgrade", upgradeRoutes);
+app.use("/upgrade/ipt", iptUpgradeRoutes);
+app.use("/upgrade/l3vpn", l3vpnUpgradeRoutes);
 app.use("/status", statusRoutes);
 app.use("/customers", customerRoutes);
 app.use("/iptcustomers", iptCustomerRoutes);
@@ -116,6 +131,8 @@ app.use("/capacity", capacityRoutes);
 app.use("/favorites", favoriteRoutes);
 app.use("/uptime-history", uptimeHistoryRoutes);
 app.use("/churn-analysis", churnAnalysisRoutes);
+app.use("/fiber-cut-incidents", fiberCutIncidentRoutes);
+app.use("/process-monitoring", processMonitoringRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/percentile-reports", require("./routes/percentileReport.js"));
 app.use("/provisioning", require("./routes/provisioning.js"));
@@ -126,12 +143,21 @@ app.use('/pitch-for-upgrade', pitchForUpgradeRoutes);
 app.use("/export", exportRoutes);
 app.use("/switch-configurations", switchConfigurationRoutes);
 app.use("/isis-adjacency", isisAdjacentRoutes);
+app.use("/weathermap", weathermapRoutes);
+app.use("/network-maps", networkMapRoutes);
+app.use("/isis-watchlist", isisWatchlistRoutes);
 app.use("/push-token", pushTokenRoutes);
 app.use("/l3vpncustomers", l3vpnCustomerRoutes);
+app.use("/l2vpncircuits", l2vpnCircuitRoutes);
+app.use("/high-profile-customers", highProfileCustomerRoutes);
 app.use("/ftthcustomers", ftthCustomerRoutes);
 app.use("/ftth-reports", ftthReportRoutes);
 app.use("/sms", smsRoutes);
+app.use("/sms/v2", smsBroadcastV2Routes);
+app.use("/email", emailRoutes);
+app.use("/email/v2", emailBroadcastV2Routes);
 app.use("/clear-pppoe-session", clearPppoeSessionRoutes);
+app.use("/optics", opticsPowerRoutes);
 
 
 const { setUserSockets } = require("./emitNotificationToUser");
@@ -145,6 +171,8 @@ const { updateSwitchConfiguration } = require("./cron/switchConfiguration.js")(i
 const { updateL3VPN } = require("./cron/updateL3VPN.js")(io, { schedule: false });
 const { updateFTTHData } = require("./cron/updateFTTH.js")(io, { schedule: false });
 const { checkAdjacency } = require("./cron/isisAdjacent")(io, { schedule: false });
+const { updateL2VPN, updateL2VPNCircuits } = require("./cron/updateL2VPN.js")(io, { schedule: false });
+const { backfillPointToPointIps } = require("./cron/ptpBackfill")(io, { schedule: false });
 const { cleanupStatusHistory } = require("./cron/cleanupStatusHistory")({ schedule: false });
 // Remove all schedule*Cron and auto-scheduling here; handled by PM2 forked workers
 // Socket for SSH
@@ -247,6 +275,7 @@ io.on("connection", (socket) => {
     await updateFTTHData();
 
     await checkAdjacency();
+    await backfillPointToPointIps();
     // 🎯 Notify the client that the update is complete (to enable the button)
     io.emit("diaUpdateComplete"); 
   });
@@ -279,13 +308,18 @@ io.on("connection", (socket) => {
 // Only run these scheduled crons in the primary cluster process
 if (process.env.NODE_APP_INSTANCE === '0' || process.env.NODE_APP_INSTANCE === undefined) {
   require("./cron/uptimeTracker");
-  require("./cron/isisAdjacent")(io);
   const { scheduleDiaOverusageCron } = require("./cron/diaOverusageChecker");
   const { schedulePitchForUpgradeCron } = require("./cron/pitchForUpgradeChecker");
   const { scheduleFTTHDailyCheck } = require("./cron/ftthDailyChecker");
+  const { scheduleDeviceWarehouseSync } = require("./cron/deviceWarehouseSync");
+  const { schedulePitchReport } = require("./cron/pitchReportEmail");
+  const { scheduleFiberCutStaleLinksEmail } = require("./cron/fiberCutStaleLinksEmail");
   scheduleDiaOverusageCron();
   schedulePitchForUpgradeCron();
   scheduleFTTHDailyCheck();
+  scheduleDeviceWarehouseSync();
+  schedulePitchReport();
+  scheduleFiberCutStaleLinksEmail();
 }
 
 // Initialize status tracker cache and log summary only in the primary cluster process

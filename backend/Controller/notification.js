@@ -3,6 +3,29 @@ const Notification = db.notifications;
 const Favorite = db.favorites;
 const User = db.users;
 const { Op } = db.Sequelize;
+const { sendSms } = require("../utils/sms");
+
+const toDistinctUserIds = (items) => {
+  const ids = new Set();
+  for (const item of items || []) {
+    const id = typeof item === "string" ? item : item?.userId;
+    if (id) ids.add(id);
+  }
+  return [...ids];
+};
+
+const getExistingUserIdSet = async (items) => {
+  const ids = toDistinctUserIds(items);
+  if (!ids.length) return new Set();
+
+  const users = await User.findAll({
+    where: { id: ids },
+    attributes: ["id"],
+    raw: true,
+  });
+
+  return new Set(users.map((u) => u.id));
+};
 
 /**
  * Get all notifications for a user
@@ -169,8 +192,10 @@ exports.createStatusChangeNotification = async (customerData) => {
   } = customerData;
 
   try {
-    // Only notify on up -> down transitions
-    if (previousStatus !== "up" || currentStatus !== "down") {
+    // Only notify on up<->down transitions (down, or recovery back to up)
+    const isDown = previousStatus === "up" && currentStatus === "down";
+    const isRecovery = previousStatus === "down" && currentStatus === "up";
+    if (!isDown && !isRecovery) {
       return { created: 0 };
     }
 
@@ -179,17 +204,39 @@ exports.createStatusChangeNotification = async (customerData) => {
       return { created: 0 };
     }
 
-    // Find all users who have this customer in their watchlist
-    const favorites = await Favorite.findAll({
+    // customerId is only ever populated from a real customerinfos-style row
+    // (see e.g. getDiaCustomerInfoMap in utils/statusTracker.js). L2VPN
+    // circuits have no such row — a circuit spans multiple devices/hops,
+    // not one customer-info record — so trackL2VPNCircuitStatusChanges
+    // always passes customerId: null. There's currently no watchlist/
+    // Favorites support for L2VPN circuits to match against anyway, so
+    // there's nothing to notify — skip before customerId.toString() throws.
+    if (!customerId) {
+      return { created: 0 };
+    }
+
+    // Find all users who have this customer in their watchlist. A favorite
+    // can have userId: null ("global" favorite, per the model comment) —
+    // there's no one to notify or SMS for those, and Notification.userId is
+    // NOT NULL, so they're filtered out here rather than left to fail
+    // bulkCreate below.
+    const allFavorites = await Favorite.findAll({
       where: {
         customerId: customerId.toString(),
         customerType,
       },
     });
+    const favoritesWithUser = allFavorites.filter((fav) => fav.userId);
+    const existingUserIds = await getExistingUserIdSet(favoritesWithUser);
+    const favorites = favoritesWithUser.filter((fav) => existingUserIds.has(fav.userId));
 
     if (favorites.length === 0) {
       return { created: 0 };
     }
+
+    const message = isDown
+      ? `🔴 ${customerName} (${customerType}) went DOWN. Interface: ${customerInterface}, CID: ${cid || "N/A"}`
+      : `✅ ${customerName} (${customerType}) is back UP. Interface: ${customerInterface}, CID: ${cid || "N/A"}`;
 
     // Create notifications for each user watching this customer
     const notifications = favorites.map((fav) => ({
@@ -202,7 +249,7 @@ exports.createStatusChangeNotification = async (customerData) => {
       nbr,
       previousStatus,
       currentStatus,
-      message: `🔴 ${customerName} (${customerType}) went DOWN. Interface: ${customerInterface}, CID: ${cid || "N/A"}`,
+      message,
       notificationType: "status_change",
     }));
 
@@ -218,11 +265,95 @@ exports.createStatusChangeNotification = async (customerData) => {
       console.error("[NOTIFICATION] Error emitting socket notification:", e);
     }
 
-    console.log(`[NOTIFICATION] Created ${notifications.length} notifications for ${customerName} going down`);
+    console.log(`[NOTIFICATION] Created ${notifications.length} notifications for ${customerName} ${isDown ? "going down" : "recovering"}`);
+
+    // SMS to the subset of watchers who opted into SMS alerts for this
+    // customer (Favorite.smsAlertsEnabled), on both down and recovery.
+    try {
+      const smsFavorites = favorites.filter((fav) => fav.smsAlertsEnabled);
+      if (smsFavorites.length > 0) {
+        const smsUsers = await User.findAll({
+          where: {
+            id: smsFavorites.map((fav) => fav.userId),
+            isActive: true,
+            phoneNumber: { [Op.ne]: null },
+          },
+          attributes: ["phoneNumber"],
+          raw: true,
+        });
+        if (smsUsers.length > 0) {
+          await sendSms(message, smsUsers.map((u) => u.phoneNumber));
+        }
+      }
+    } catch (smsError) {
+      console.error("[NOTIFICATION] Error sending customer watchlist SMS:", smsError.message);
+    }
 
     return { created: notifications.length };
   } catch (error) {
     console.error("Error creating status change notifications:", error);
+    return { created: 0, error: error.message };
+  }
+};
+
+/**
+ * Create in-app notifications for users watching an ISIS adjacent link
+ * (isis_watchlist, matched by point_to_point_ip) when it goes down or
+ * recovers. Unlike createStatusChangeNotification's SMS path (gated on the
+ * canReceiveIsisSms/highTrafficSmsEnabled toggles), this in-app channel is
+ * independent of those SMS preferences — it only honors isisWatchScope, via
+ * getIsisAlertRecipients(..., { requireSmsOptIn: false }).
+ */
+exports.createIsisAlertNotification = async ({
+  pointToPointIp,
+  deviceName,
+  neighborName,
+  interfaceName,
+  previousStatus,
+  currentStatus,
+  message,
+}) => {
+  try {
+    const { getIsisAlertRecipients } = require("../utils/notificationRecipients");
+    const { users } = await getIsisAlertRecipients(pointToPointIp, "link", {
+      requireSmsOptIn: false,
+    });
+
+    if (users.length === 0) return { created: 0 };
+
+    const customerId = pointToPointIp || `${deviceName}:${neighborName}:${interfaceName}`;
+    const customerName = `${deviceName} x ${neighborName}`;
+
+    const notifications = users.map((u) => ({
+      userId: u.id,
+      customerId,
+      customerName,
+      customerType: "ISIS",
+      interface: interfaceName,
+      cid: null,
+      nbr: neighborName,
+      previousStatus,
+      currentStatus,
+      message,
+      notificationType: "status_change",
+    }));
+
+    await Notification.bulkCreate(notifications);
+
+    try {
+      const { emitNotificationToUser } = require("../emitNotificationToUser");
+      notifications.forEach((notif) => {
+        emitNotificationToUser(notif.userId, notif);
+      });
+    } catch (e) {
+      console.error("[NOTIFICATION] Error emitting ISIS socket notification:", e);
+    }
+
+    console.log(`[NOTIFICATION] Created ${notifications.length} ISIS notifications for ${customerName}`);
+
+    return { created: notifications.length };
+  } catch (error) {
+    console.error("Error creating ISIS alert notifications:", error);
     return { created: 0, error: error.message };
   }
 };
@@ -338,14 +469,20 @@ exports.checkAndNotify = async (req, res) => {
       }
     }
 
+    let insertedCount = 0;
     if (notifications.length > 0) {
-      await Notification.bulkCreate(notifications);
+      const existingUserIds = await getExistingUserIdSet(notifications.map((n) => n.userId));
+      const safeNotifications = notifications.filter((n) => existingUserIds.has(n.userId));
+      if (safeNotifications.length > 0) {
+        await Notification.bulkCreate(safeNotifications);
+        insertedCount = safeNotifications.length;
+      }
     }
 
     res.status(200).json({
-      message: `Checked ${customerMap.size} customers, created ${notifications.length} notifications`,
+      message: `Checked ${customerMap.size} customers, created ${insertedCount} notifications`,
       customersChecked: customerMap.size,
-      notificationsCreated: notifications.length,
+      notificationsCreated: insertedCount,
     });
   } catch (error) {
     console.error("Error in checkAndNotify:", error);

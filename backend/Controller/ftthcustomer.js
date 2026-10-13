@@ -69,6 +69,7 @@ exports.getAllFTTHCustomers = async (req, res) => {
   const expiryFilter = req.query.expiry || "";
   const withinDays = parseInt(req.query.withinDays) || 0;
   const ipVersionFilter = req.query.ip_version || "";
+  const freeStatusFilter = req.query.freeStatus || "";
 
   try {
     const whereClause = {};
@@ -90,7 +91,19 @@ exports.getAllFTTHCustomers = async (req, res) => {
       whereClause.ip_version = ipVersionFilter;
     }
 
-    if (withinDays > 0) {
+    if (freeStatusFilter === "free") {
+      whereClause.isFreeCustomer = true;
+    } else if (freeStatusFilter === "nonfree") {
+      whereClause.isFreeCustomer = false;
+    }
+
+    if (expiryFilter === "expiredOver") {
+      // Expired more than N days ago (default 90)
+      const days = withinDays > 0 ? withinDays : 90;
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      const cutoff = new Date(startOfToday.getTime() - days * 24 * 60 * 60 * 1000);
+      whereClause.topUpExpiry = { [Op.lt]: cutoff };
+    } else if (withinDays > 0) {
       const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
       const past = new Date(startOfToday.getTime() - withinDays * 24 * 60 * 60 * 1000);
       const future = new Date(startOfToday.getTime() + withinDays * 24 * 60 * 60 * 1000);
@@ -146,6 +159,7 @@ exports.exportFTTHCustomers = async (req, res) => {
   const expiryFilter = req.query.expiry || "";
   const withinDays = parseInt(req.query.withinDays) || 0;
   const ipVersionFilter = req.query.ip_version || "";
+  const freeStatusFilter = req.query.freeStatus || "";
 
   try {
     const whereClause = {};
@@ -167,7 +181,19 @@ exports.exportFTTHCustomers = async (req, res) => {
       whereClause.ip_version = ipVersionFilter;
     }
 
-    if (withinDays > 0) {
+    if (freeStatusFilter === "free") {
+      whereClause.isFreeCustomer = true;
+    } else if (freeStatusFilter === "nonfree") {
+      whereClause.isFreeCustomer = false;
+    }
+
+    if (expiryFilter === "expiredOver") {
+      // Expired more than N days ago (default 90)
+      const days = withinDays > 0 ? withinDays : 90;
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      const cutoff = new Date(startOfToday.getTime() - days * 24 * 60 * 60 * 1000);
+      whereClause.topUpExpiry = { [Op.lt]: cutoff };
+    } else if (withinDays > 0) {
       const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
       const past = new Date(startOfToday.getTime() - withinDays * 24 * 60 * 60 * 1000);
       const future = new Date(startOfToday.getTime() + withinDays * 24 * 60 * 60 * 1000);

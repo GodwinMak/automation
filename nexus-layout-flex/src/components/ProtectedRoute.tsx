@@ -1,7 +1,7 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuthContext } from "@/hooks/useAuthContext";
-import { Permissions } from "@/Context/AuthContext";
+import { Permissions, UserFlag } from "@/Context/AuthContext";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,17 @@ import { Button } from "@/components/ui/button";
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredPermission?: keyof Permissions;
+  requiredFlag?: UserFlag;
   requiredRoles?: Array<"admin" | "operator" | "customer_relation">;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredPermission,
+  requiredFlag,
   requiredRoles,
 }) => {
-  const { state, hasPermission } = useAuthContext();
+  const { state, hasPermission, hasFlag } = useAuthContext();
   const location = useLocation();
 
   // Show loading state
@@ -41,6 +43,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // Check permission requirement
   if (requiredPermission && !hasPermission(requiredPermission)) {
+    return <AccessDenied message={`You don't have permission to access this feature.`} />;
+  }
+
+  // Check individually-granted flag requirement
+  if (requiredFlag && !hasFlag(requiredFlag)) {
     return <AccessDenied message={`You don't have permission to access this feature.`} />;
   }
 

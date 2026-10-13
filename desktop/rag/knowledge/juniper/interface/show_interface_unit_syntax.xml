@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Operational "show interfaces" Syntax for a Logical Unit
+-->
+<knowledgeTopic>
+  <topic id="show-interface-unit-syntax" title="Juniper Operational &quot;show interfaces&quot; Syntax for a Logical Unit" category="interface">
+
+    <interfaceNamePrefixes>Besides standard physical prefixes (ge-, xe-, et-, ae, lo, irb), this network utilizes ps{N} interfaces. A ps{N} interface functions as a pseudowire (a subscriber-facing pseudo/logical interface bundle) connecting to the PE/BNG. This applies to ALL services that terminate via pseudowires on the PE. This architecture allows multiple VLAN-tagged customers to terminate via pseudowires on the PE/BNG over a shared physical port. A name like ps4411 is a valid, native interface on this network—treat it like any standard interface using dot notation for its logical unit (e.g., ps4411.4411).</interfaceNamePrefixes>
+
+    <findingDeviceForPsInterface>A ps* pseudowire interface (e.g. ps4603.4603) lives directly on a PE/BNG, not on the Metro switch. Because a customer could be homed on any of several candidate devices, if the device IP is unknown, query each candidate IP sequentially (e.g. via get_interface_config or run_live_diagnostics using the interface.unit format) until a match is found: 197.155.94.100, 197.155.94.138, 41.175.38.42, 41.175.38.43. This corresponds to the candidate PE/BNG list in the DIA runbook (LTZ-BNG02-TIG-DAR, LTZ-BNG02-RAH-DAR, LTZ-PE1-RAH, LTZ-PE1-TIG). For ARP-specific verification against this same candidate device list (rather than interface state), see routing/arp.xml's bngSubscriberResolution section — it documents `show arp no-resolve interface ps&lt;N&gt;.&lt;unit&gt;` against these exact four devices, plus the rule that a ps* interface's number always equals its unit number.</findingDeviceForPsInterface>
+
+    <commonMistake>show interfaces &lt;interface&gt; unit &lt;unit&gt; is INVALID operational-mode syntax and will return a syntax error. The "unit &lt;number&gt;" keyword exists only in CONFIGURATION mode (e.g. set interfaces ge-0/0/12 unit 2847 ..., show configuration interfaces ge-0/0/12 unit 2847) and cannot be used in operational show commands.</commonMistake>
+
+    <correctSyntax>
+      <description>To view a specific logical unit's operational state, append the unit number to the interface name with a dot — do not use the "unit" keyword:</description>
+      <command>show interfaces &lt;interface&gt;.&lt;unit&gt;</command>
+      <command>show interfaces &lt;interface&gt;.&lt;unit&gt; extensive</command>
+      <command>show interfaces &lt;interface&gt;.&lt;unit&gt; detail</command>
+      <command>show interfaces &lt;interface&gt;.&lt;unit&gt; terse</command>
+    </correctSyntax>
+
+    <example title="real device output">
+      <command>godwin.makyao@LTZ-ACC2-ZAN&gt; show interfaces ge-0/0/12.2847</command>
+      <output>  Logical interface ge-0/0/12.2847 (Index 571) (SNMP ifIndex 531)
+    Description: {cat=L2VPN|nbr=LTZ-ACC2-RAH ge-0/0/37|Customer=Pilipili Entertainment2847|cid=LTZ4900384|Mbps=10}
+    Flags: SNMP-Traps CCC-Down 0x4000 VLAN-Tag [ 0x8100.2847 ]  Encapsulation: VLAN-CCC
+    Input packets : 0
+    Output packets: 0
+    Protocol ccc, MTU: 9000</output>
+    </example>
+
+    <physicalOnlyAlternative>
+      <description>Omitting the unit shows the physical interface and ALL of its logical units together:</description>
+      <command>show interfaces &lt;interface&gt;</command>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+    </physicalOnlyAlternative>
+
+    <quickDescriptionCheck>
+      <description>To see just an interface's configured description (customer/circuit metadata tag, e.g. the {cat=...|nbr=...|Customer=...|cid=...|Mbps=...} format used throughout this network) without pulling full extensive output, pipe descriptions through match:</description>
+      <command>show interfaces descriptions | match &lt;interface&gt;</command>
+      <note>This also works with a logical unit appended (e.g. match ge-0/0/12.2847) to isolate one specific unit's description when the physical port has several. Note the command is "descriptions" (plural) — this is also Step 1 of the DIA diagnosis runbook (show interfaces descriptions | match {interfaceName}), used there to confirm an interface exists and check its admin/operational status columns.</note>
+      <example title="for ge-0/0/12">show interfaces descriptions | match ge-0/0/12</example>
+    </quickDescriptionCheck>
+
+    <summary>
+      <item>Operational mode (live device state): show interfaces ps4411.4411 — dot notation, no "unit" keyword.</item>
+      <item>Configuration mode (candidate/active config): set interfaces ps4411 unit 4411 ... / show configuration interfaces ps4411 unit 4411 — "unit" is a keyword here, not a dot.</item>
+    </summary>
+    <warning>Never mix the two conventions — using unit &lt;number&gt; after an interface name in an operational show interfaces command always fails.</warning>
+  </topic>
+</knowledgeTopic>

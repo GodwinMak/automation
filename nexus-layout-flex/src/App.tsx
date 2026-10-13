@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { MessageCircle } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -16,6 +16,10 @@ import NotFound from "./pages/NotFound";
 import Switches from "./pages/Swithches";
 import WebTerminal from "./pages/Terminal";
 import DiaCustomer from "./pages/DiaCustomer";
+import TemporaryUpgrades from "./pages/TemporaryUpgrades";
+import UpgradeHistory from "./pages/UpgradeHistory";
+import HighProfileCustomers from "./pages/HighProfileCustomers";
+import SmsDeliveryReport from "./pages/SmsDeliveryReport";
 import ViewDiaCutomer from "./pages/ViewDiaCutomer";
 import ViewIptCustomer from "./pages/ViewIptCustomer";
 import SharedCustomer from "./pages/SharedCustomer";
@@ -26,13 +30,16 @@ import Capacity from "./pages/Capacity";
 import Watchlist from "./pages/Watchlist";
 import UptimeTrends from "./pages/UptimeTrends";
 import ChurnAnalysis from "./pages/ChurnAnalysis";
+import FiberCutIncidents from "./pages/FiberCutIncidents";
 import IptPercentileReport from "./pages/IptPercentileReport";
 import DiaPercentileReport from "./pages/DiaPercentileReport";
 import GponPercentileReport from "./pages/GponPercentileReport";
 import CombinedPercentileReport from "./pages/CombinedPercentileReport";
 import NonTagDIA from "./pages/NonTagDIA";
 import WithTagDIA from "./pages/WithTagDIA";
+import GponOverEnterprise from "./pages/GponOverEnterprise";
 import UserManagement from "./pages/UserManagement";
+import ProcessMonitoring from "./pages/ProcessMonitoring";
 import DiaOverusageReport from "./pages/DiaOverusageReport";
 import PitchForUpgrade from "./pages/PitchForUpgrade";
 import SwitchConfigurations from "./pages/SwitchConfigurations";
@@ -40,10 +47,19 @@ import SwitchMap from "./pages/SwitchMap";
 import IsisImpactAnalyzer from "./pages/IsisImpactAnalyzer";
 import L3VPNCustomer from "./pages/L3VPNCustomer";
 import ViewL3VPNCustomer from "./pages/ViewL3VPNCustomer";
+import L2VPNCircuits from "./pages/L2VPNCircuits";
+import ViewL2VPNCircuit from "./pages/ViewL2VPNCircuit";
 import ViewFTTHCustomer from "./pages/ViewFTTHCustomer";
 import FTTHCustomer from "./pages/FTTHCustomer";
 import FTTHReports from "./pages/FTTHReports";
 import SmsBroadcast from "./pages/SmsBroadcast";
+import SmsBroadcastV2 from "./pages/SmsBroadcastV2";
+import EmailBroadcastV2 from "./pages/EmailBroadcastV2";
+import OpticalPower from "./pages/OpticsPower";
+import PingMonitor from "./pages/PingMonitor";
+import NetworkMaps from "./pages/NetworkMaps";
+import ViewNetworkMap from "./pages/ViewNetworkMap";
+import EditNetworkMap from "./pages/EditNetworkMap";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +69,27 @@ const App = () => {
   const handleCloseTerminal = () => {
     setConnection(null);
   };
+
+  // Browsers block audio.play() until the user has interacted with the page
+  // at least once. Prime playback on the very first interaction so real-time
+  // notification sounds (see NotificationBell) aren't lost while the page is
+  // sitting idle waiting for its first alert.
+  useEffect(() => {
+    const unlockAudio = () => {
+      const audio = new Audio("/notification.mp3");
+      audio.volume = 0;
+      audio
+        .play()
+        .then(() => audio.pause())
+        .catch(() => {});
+    };
+    document.addEventListener("pointerdown", unlockAudio, { once: true });
+    document.addEventListener("keydown", unlockAudio, { once: true });
+    return () => {
+      document.removeEventListener("pointerdown", unlockAudio);
+      document.removeEventListener("keydown", unlockAudio);
+    };
+  }, []);
 
   return (
     <ThemeProvider defaultTheme="dark" storageKey="nexus-ui-theme">
@@ -124,6 +161,22 @@ const App = () => {
                     }
                   />
                   <Route
+                    path="/temporary-upgrades"
+                    element={
+                      <ProtectedRoute>
+                        <TemporaryUpgrades />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/upgrade-history"
+                    element={
+                      <ProtectedRoute>
+                        <UpgradeHistory />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/ipt-customer"
                     element={
                       <ProtectedRoute>
@@ -148,10 +201,34 @@ const App = () => {
                     }
                   />
                   <Route
+                    path="/high-profile-customers"
+                    element={
+                      <ProtectedRoute>
+                        <HighProfileCustomers />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/view-l3vpn-customer"
                     element={
                       <ProtectedRoute>
                         <ViewL3VPNCustomer />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/l2vpn-circuits"
+                    element={
+                      <ProtectedRoute>
+                        <L2VPNCircuits />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/view-l2vpn-circuit"
+                    element={
+                      <ProtectedRoute>
+                        <ViewL2VPNCircuit />
                       </ProtectedRoute>
                     }
                   />
@@ -179,11 +256,35 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
-                  <Route
+                  {/* <Route
                     path="/sms-broadcast"
                     element={
                       <ProtectedRoute>
                         <SmsBroadcast />
+                      </ProtectedRoute>
+                    }
+                  /> */}
+                  <Route
+                    path="/sms-broadcast"
+                    element={
+                      <ProtectedRoute>
+                        <SmsBroadcastV2 />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/email-broadcast"
+                    element={
+                      <ProtectedRoute>
+                        <EmailBroadcastV2 />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/sms-broadcast/delivery-report/:campaignId"
+                    element={
+                      <ProtectedRoute>
+                        <SmsDeliveryReport />
                       </ProtectedRoute>
                     }
                   />
@@ -245,6 +346,14 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route
+                    path="/process-monitoring"
+                    element={
+                      <ProtectedRoute requiredFlag="canViewProcessMonitoring">
+                        <ProcessMonitoring />
+                      </ProtectedRoute>
+                    }
+                  />
 
                   {/* Restricted routes - Not for Customer Relation */}
                   <Route
@@ -284,6 +393,14 @@ const App = () => {
                     element={
                       <ProtectedRoute requiredPermission="canViewChurnAnalysis">
                         <ChurnAnalysis />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/outage-incidents"
+                    element={
+                      <ProtectedRoute requiredPermission="canViewChurnAnalysis">
+                        <FiberCutIncidents />
                       </ProtectedRoute>
                     }
                   />
@@ -336,6 +453,14 @@ const App = () => {
                     }
                   />
                   <Route
+                    path="/gpon-over-enterprise"
+                    element={
+                      <ProtectedRoute requiredPermission="canConfigureCustomers">
+                        <GponOverEnterprise />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/switch-configurations"
                     element={
                       <ProtectedRoute requiredPermission="canConfigureCustomers">
@@ -351,6 +476,30 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route
+                    path="/optical-power"
+                    element={
+                      <ProtectedRoute>
+                        <OpticalPower />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/ping-monitor"
+                    element={
+                      <ProtectedRoute>
+                        <PingMonitor />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/network-maps"
+                    element={
+                      <ProtectedRoute>
+                        <NetworkMaps />
+                      </ProtectedRoute>
+                    }
+                  />
 
                   <Route path="*" element={<NotFound />} />
                 </Route>
@@ -362,6 +511,26 @@ const App = () => {
                       </ProtectedRoute>
                     }
                   />
+                {/* Standalone (no dashboard sidebar/header) — these are
+                    full-canvas diagram pages, same treatment as /isis-impact
+                    above, and they're meant to open in their own tab/page
+                    rather than live inside the regular app shell. */}
+                <Route
+                  path="/network-maps/:id"
+                  element={
+                    <ProtectedRoute>
+                      <ViewNetworkMap />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/network-maps/:id/edit"
+                  element={
+                    <ProtectedRoute requiredPermission="canManageNetworkMaps">
+                      <EditNetworkMap />
+                    </ProtectedRoute>
+                  }
+                />
               </Routes>
             </BrowserRouter>
           </TooltipProvider>

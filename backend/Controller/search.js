@@ -10,6 +10,7 @@ const SharedCustomer = db.sharedcustomers;
 const L3VPNCustomerInfo = db.l3vpncustomerinfos;
 const L3VPNCustomer = db.l3vpncustomers;
 const FTTHCustomer = db.ftthcustomers;
+const { computeAllL2VPNCircuits } = require("./l2vpnCircuit");
 
 exports.globalSearch = async (req, res) => {
   const query = req.query.q || "";
@@ -143,6 +144,22 @@ exports.globalSearch = async (req, res) => {
       limit: limit,
     });
 
+    // Search L2VPN circuits by customer name or circuit ID (virtualCircuitId).
+    // L2VPN has no simple customerinfos-style table to query directly — a
+    // circuit only exists as the output of computeAllL2VPNCircuits' full
+    // discover/cluster/chain-walk pipeline (see Controller/l2vpnCircuit.js),
+    // so this filters in-memory rather than via a SQL WHERE like the other
+    // types above.
+    const needle = query.toLowerCase();
+    const allL2vpnCircuits = await computeAllL2VPNCircuits();
+    const l2vpnResults = allL2vpnCircuits
+      .filter(
+        (c) =>
+          c.customerName?.toLowerCase().includes(needle) ||
+          c.hops.some((h) => h.virtualCircuitId?.toLowerCase().includes(needle)),
+      )
+      .slice(0, limit);
+
     // Format results with type identifier
     const formattedResults = [
       ...diaResults.map((item) => ({
@@ -204,6 +221,24 @@ exports.globalSearch = async (req, res) => {
         type: "FTTH",
         route: "/view-ftth-customer",
         data: item,
+      })),
+      ...l2vpnResults.map((circuit) => ({
+        // virtualCircuitId is the only stable identity a circuit has (see
+        // cron/updateL2VPN.js) — fall back to customerName if genuinely
+        // absent (shouldn't normally happen for a circuit with >=2 hops).
+        id: circuit.hops[0]?.virtualCircuitId || circuit.customerName,
+        customerName: circuit.customerName,
+        cid: circuit.hops[0]?.virtualCircuitId || "",
+        interface: circuit.hops[0]?.interface || "",
+        nbr: circuit.hops[0]?.neighbor || "",
+        vlan: circuit.hops[0]?.vlanId || "",
+        status: circuit.overallOperationalStatus || "unknown",
+        switchName: circuit.hops[0]?.switchName || "",
+        type: "L2VPN",
+        route: "/view-l2vpn-circuit",
+        // The full computed circuit (with hops) — ViewL2VPNCircuit.tsx reads
+        // this straight out of location.state.circuit, no extra fetch needed.
+        data: circuit,
       })),
     ];
 

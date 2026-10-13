@@ -1,0 +1,32 @@
+{
+  "name": "desktop",
+  "productName": "LIT Terminal",
+  "version": "0.1.0",
+  "description": "Desktop SSH terminal with an embedded Junos troubleshooting assistant, built by Liquid Intelligence Technologies with Electron",
+  "main": "main.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "GSETTINGS_SCHEMA_DIR=/usr/share/glib-2.0/schemas electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^6.0.0",
+    "ssh2": "^1.16.0",
+    "dotenv": "^16.4.5",
+    "undici": "^6.19.8",
+    "pdf-parse": "^1.1.1",
+    "html-to-text": "^9.0.5",
+    "openai": "^4.68.0",
+    "@google/genai": "^1.0.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.10.2",
+    "@electron-forge/maker-deb": "^7.10.2",
+    "@electron-forge/maker-rpm": "^7.10.2",
+    "@electron-forge/maker-squirrel": "^7.10.2",
+    "@electron-forge/maker-zip": "^7.10.2",
+    "electron": "^41.7.1"
+  }
+}

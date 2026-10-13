@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, X, Network, Globe, Share2, Route, Wifi, ArrowRight, Loader2 } from "lucide-react";
+import { Search, X, Network, Globe, Share2, Route, Wifi, Waypoints, ArrowRight, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -11,9 +11,10 @@ interface SearchResult {
   cid: string;
   interface: string;
   nbr: string;
+  vlan?: string;
   status: string;
   switchName: string;
-  type: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH";
+  type: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH" | "L2VPN";
   route: string;
   data: any;
 }
@@ -121,6 +122,10 @@ export const GlobalSearch = () => {
       navigate(result.route, { state: { customer: result.data } });
     } else if (result.type === "FTTH") {
       navigate(result.route, { state: { customer: result.data } });
+    } else if (result.type === "L2VPN") {
+      // ViewL2VPNCircuit.tsx expects the full computed circuit (with hops)
+      // under location.state.circuit, not "customer" like the other types.
+      navigate(result.route, { state: { circuit: result.data } });
     }
   };
 
@@ -136,6 +141,8 @@ export const GlobalSearch = () => {
         return <Route className="h-4 w-4 text-green-500" />;
       case "FTTH":
         return <Wifi className="h-4 w-4 text-teal-500" />;
+      case "L2VPN":
+        return <Waypoints className="h-4 w-4 text-cyan-500" />;
       default:
         return <Network className="h-4 w-4" />;
     }
@@ -153,6 +160,8 @@ export const GlobalSearch = () => {
         return "bg-green-500/10 text-green-500 border-green-500/20";
       case "FTTH":
         return "bg-teal-500/10 text-teal-500 border-teal-500/20";
+      case "L2VPN":
+        return "bg-cyan-500/10 text-cyan-500 border-cyan-500/20";
       default:
         return "bg-muted text-muted-foreground";
     }
@@ -254,6 +263,7 @@ export const GlobalSearch = () => {
                         {result.cid && <span>CID: {result.cid}</span>}
                         {result.interface && <span>• {result.interface}</span>}
                         {result.nbr && <span>• {result.nbr}</span>}
+                        {result.type === "L2VPN" && result.vlan && <span>• VLAN {result.vlan}</span>}
                       </div>
                     </div>
 

@@ -10,6 +10,7 @@ const { QueryTypes } = require("sequelize");
 const { createStatusChangeNotification } = require("../Controller/notification");
 const { emitNotificationToAll } = require("../emitNotificationToUser");
 const { publish: publishToRedis } = require("./ioPublisher");
+const { handleStatusChanges: handleMassOutageChanges } = require("./fiberCutDetector");
 
 // In-memory cache to track last known status and timestamp per interface
 const statusCache = {
@@ -18,40 +19,9 @@ const statusCache = {
   SHARED: new Map(),
   L3VPN: new Map(),
   FTTH: new Map(),
+  L2VPN: new Map(),
 };
 
-// Off-hours configuration (22:00 - 04:00)
-// DIA and SHARED customers are home/office customers who are likely sleeping/out of office
-const OFF_HOURS_START = 22; // 10 PM
-const OFF_HOURS_END = 4;    // 4 AM
-
-/**
- * Check if current time is within off-hours (22:00 - 04:00)
- * @returns {boolean} true if within off-hours
- */
-const isOffHours = () => {
-  const now = new Date();
-  const hour = now.getHours();
-  // Off-hours: 22:00 (10 PM) to 04:00 (4 AM)
-  // This means hour >= 22 OR hour < 4
-  return hour >= OFF_HOURS_START || hour < OFF_HOURS_END;
-};
-
-/**
- * Check if status change tracking should be skipped for this customer type
- * DIA and SHARED customers are skipped during off-hours (22:00 - 04:00)
- * IPT customers are always tracked (24/7)
- * @param {string} customerType - DIA, IPT, or SHARED
- * @returns {boolean} true if tracking should be skipped
- */
-const shouldSkipTracking = (customerType) => {
-  // IPT, L3VPN, and FTTH are always tracked (24/7)
-  if (customerType === "IPT" || customerType === "L3VPN" || customerType === "FTTH") {
-    return false;
-  }
-  // DIA and SHARED are home/office customers - skip during off-hours
-  return isOffHours();
-};
 
 /**
  * Initialize the cache from the database on startup
@@ -98,6 +68,7 @@ const initializeCache = async () => {
     console.log(`  - SHARED: ${statusCache.SHARED.size} interfaces`);
     console.log(`  - L3VPN: ${statusCache.L3VPN.size} interfaces`);
     console.log(`  - FTTH: ${statusCache.FTTH.size} interfaces`);
+    console.log(`  - L2VPN: ${statusCache.L2VPN.size} interfaces`);
   } catch (error) {
     console.error("[StatusTracker] Error initializing cache:", error.message);
   }
@@ -116,23 +87,7 @@ const trackStatusChanges = async (interfaces, customerType, customerInfoMap = {}
     return;
   }
 
-  // Check if we should skip tracking for this customer type during off-hours
-  const skipTracking = shouldSkipTracking(customerType);
   const now = new Date();
-  const currentHour = now.getHours();
-
-  if (skipTracking) {
-    console.log(`[StatusTracker] ⏰ Skipping ${customerType} tracking during off-hours (current hour: ${currentHour}:00)`);
-    // Still update the cache so we don't get false changes when business hours resume
-    for (const intf of interfaces) {
-      const newStatus = intf.operationalStatus?.toLowerCase() || "unknown";
-      cache.set(intf.interface, {
-        status: newStatus,
-        timestamp: now,
-      });
-    }
-    return [];
-  }
 
   const changes = [];
 
@@ -189,58 +144,173 @@ const trackStatusChanges = async (interfaces, customerType, customerInfoMap = {}
         : StatusChangeHistory;
       await targetModel.bulkCreate(changes);
       console.log(`[StatusTracker] Logged ${changes.length} status changes for ${customerType}`);
-      
-      // Trigger notifications for up -> down transitions
-      for (const change of changes) {
-        if (change.previousStatus === "up" && change.newStatus === "down") {
-          try {
-            // Broadcast real-time link-down alert for monitoring UIs.
-            const realtimePayload = {
-              customerId: change.customerId,
-              customerName: change.customerName || "N/A",
-              customerType: change.customerType,
-              interface: change.interface,
-              cid: change.cid || "N/A",
-              nbr: change.nbr || "N/A",
-              previousStatus: change.previousStatus,
-              currentStatus: change.newStatus,
-              switchName: change.switchName || null,
-              notificationType: "status_change",
-              message: `🔴 ${change.customerName || "Customer"} (${change.customerType}) went DOWN. Interface: ${change.interface}, CID: ${change.cid || "N/A"}`,
-              timestamp: new Date().toISOString(),
-            };
 
-            const emittedCount = emitNotificationToAll(realtimePayload);
-            // If this process has no connected sockets (cron worker / fork),
-            // publish through Redis so the server cluster delivers it to clients.
-            if (emittedCount === 0) {
-              await publishToRedis("linkDownAlert", realtimePayload);
-            }
-
-            const result = await createStatusChangeNotification({
-              customerId: change.customerId,
-              customerName: change.customerName,
-              customerType: change.customerType,
-              interface: change.interface,
-              cid: change.cid,
-              nbr: change.nbr,
-              previousStatus: change.previousStatus,
-              currentStatus: change.newStatus,
-            });
-            if (result.created > 0) {
-              console.log(`[StatusTracker] 🔔 Sent ${result.created} notifications for ${change.customerName} going down`);
-            }
-          } catch (notifyError) {
-            console.error(`[StatusTracker] Error sending notification:`, notifyError.message);
-          }
-        }
-      }
+      await notifyDownTransitions(changes);
+      await notifyUpTransitions(changes);
+      await notifyChurnRiskTransitions(changes);
     } catch (error) {
       console.error(`[StatusTracker] Error logging changes:`, error.message);
     }
+
+    // Group simultaneous downs into fiber-cut / mass-outage incidents and
+    // track member restorations. Never allowed to break status tracking.
+    await handleMassOutageChanges(changes, now);
   }
 
   return changes;
+};
+
+/**
+ * Send real-time + persisted notifications for up -> down transitions.
+ * Shared by trackStatusChanges and any other code path that logs a forced
+ * status change outside the normal per-type polling loop — e.g. the
+ * ISIS-adjacency-driven "device fully isolated" detection in
+ * fiberCutDetector.js, which forces customers down when their hosting
+ * device can't be reached to poll them directly.
+ */
+const notifyDownTransitions = async (changes) => {
+  for (const change of changes) {
+    if (change.previousStatus !== "up" || change.newStatus !== "down") continue;
+    try {
+      // Broadcast real-time link-down alert for monitoring UIs.
+      const realtimePayload = {
+        customerId: change.customerId,
+        customerName: change.customerName || "N/A",
+        customerType: change.customerType,
+        interface: change.interface,
+        cid: change.cid || "N/A",
+        nbr: change.nbr || "N/A",
+        previousStatus: change.previousStatus,
+        currentStatus: change.newStatus,
+        switchName: change.switchName || null,
+        notificationType: "status_change",
+        message: `🔴 ${change.customerName || "Customer"} (${change.customerType}) went DOWN. Interface: ${change.interface}, CID: ${change.cid || "N/A"}`,
+        timestamp: new Date().toISOString(),
+      };
+
+      const emittedCount = emitNotificationToAll(realtimePayload);
+      // If this process has no connected sockets (cron worker / fork),
+      // publish through Redis so the server cluster delivers it to clients.
+      if (emittedCount === 0) {
+        await publishToRedis("linkDownAlert", realtimePayload);
+      }
+
+      const result = await createStatusChangeNotification({
+        customerId: change.customerId,
+        customerName: change.customerName,
+        customerType: change.customerType,
+        interface: change.interface,
+        cid: change.cid,
+        nbr: change.nbr,
+        previousStatus: change.previousStatus,
+        currentStatus: change.newStatus,
+      });
+      if (result.created > 0) {
+        console.log(`[StatusTracker] 🔔 Sent ${result.created} notifications for ${change.customerName} going down`);
+      }
+    } catch (notifyError) {
+      console.error(`[StatusTracker] Error sending notification:`, notifyError.message);
+    }
+  }
+};
+
+/**
+ * Send real-time + persisted notifications for down -> up (recovery)
+ * transitions. Mirrors notifyDownTransitions but is deliberately a separate
+ * function rather than a single bidirectional one: fiberCutDetector.js's
+ * device-isolation path calls notifyDownTransitions directly to force
+ * customers down when their hosting device is unreachable, and that forced
+ * state has no legitimate "recovery" of its own — it shouldn't pick up
+ * up-transition notifications just because this function exists.
+ */
+const notifyUpTransitions = async (changes) => {
+  for (const change of changes) {
+    if (change.previousStatus !== "down" || change.newStatus !== "up") continue;
+    try {
+      const realtimePayload = {
+        customerId: change.customerId,
+        customerName: change.customerName || "N/A",
+        customerType: change.customerType,
+        interface: change.interface,
+        cid: change.cid || "N/A",
+        nbr: change.nbr || "N/A",
+        previousStatus: change.previousStatus,
+        currentStatus: change.newStatus,
+        switchName: change.switchName || null,
+        notificationType: "status_change",
+        message: `✅ ${change.customerName || "Customer"} (${change.customerType}) is back UP. Interface: ${change.interface}, CID: ${change.cid || "N/A"}`,
+        timestamp: new Date().toISOString(),
+      };
+
+      const emittedCount = emitNotificationToAll(realtimePayload);
+      if (emittedCount === 0) {
+        await publishToRedis("linkDownAlert", realtimePayload);
+      }
+
+      const result = await createStatusChangeNotification({
+        customerId: change.customerId,
+        customerName: change.customerName,
+        customerType: change.customerType,
+        interface: change.interface,
+        cid: change.cid,
+        nbr: change.nbr,
+        previousStatus: change.previousStatus,
+        currentStatus: change.newStatus,
+      });
+      if (result.created > 0) {
+        console.log(`[StatusTracker] 🔔 Sent ${result.created} notifications for ${change.customerName} recovering`);
+      }
+    } catch (notifyError) {
+      console.error(`[StatusTracker] Error sending recovery notification:`, notifyError.message);
+    }
+  }
+};
+
+// L2VPN is the one customer type where Churn Analysis (getExtendedDowntimeCustomers
+// in Controller/churnAnalysis.js) treats "mixed" — one leg of a multi-hop
+// circuit down — as churn-worthy on its own, not just a full "down". Kept
+// here so the push trigger below fires on exactly the same transitions
+// churn considers "at risk", not a broader or narrower set.
+const CHURN_RISK_STATUSES_BY_TYPE = {
+  L2VPN: new Set(["down", "mixed"]),
+};
+
+const isChurnRiskTransition = (change) => {
+  if (change.previousStatus !== "up") return false;
+  const churnStatuses = CHURN_RISK_STATUSES_BY_TYPE[change.customerType] || new Set(["down"]);
+  return churnStatuses.has(change.newStatus);
+};
+
+/**
+ * Push notification (sound + OS-level alert, same Expo push mechanism as
+ * cron/isisAdjacent.js's "ISIS Link Down" alert) for a customer newly
+ * entering a status Churn Analysis itself would flag as at-risk. Deliberately
+ * separate from notifyDownTransitions above — that one only ever fires on a
+ * plain up->down transition and only sends the in-app/DB notification, never
+ * a push; this fires on down for every type OR mixed for L2VPN specifically,
+ * and only ever sends the push. No cooldown/dedup needed beyond what's
+ * already built into trackStatusChanges: a "change" only exists here because
+ * the in-memory cache detected an actual status flip, so this can never fire
+ * twice for the same continuous down/mixed period.
+ */
+const notifyChurnRiskTransitions = async (changes) => {
+  const churnChanges = changes.filter(isChurnRiskTransition);
+  if (churnChanges.length === 0) return;
+
+  try {
+    const sendPushNotification = require("./sendPushNotification");
+    const tokens = await sendPushNotification.getAllTokens();
+    if (tokens.length === 0) return;
+
+    for (const change of churnChanges) {
+      const label = change.newStatus.toUpperCase();
+      const message = `${change.customerName || change.interface} (${change.customerType}) is now ${label} — flagged in Churn Analysis.`;
+      await sendPushNotification(tokens, "Churn Risk Alert", message);
+    }
+    console.log(`[StatusTracker] 🔔 Sent churn-risk push for ${churnChanges.length} transition(s)`);
+  } catch (err) {
+    console.error(`[StatusTracker] Error sending churn-risk push notifications:`, err.message);
+  }
 };
 
 /**
@@ -348,14 +418,13 @@ const getL3vpnCustomerInfoMap = async () => {
 module.exports = {
   initializeCache,
   trackStatusChanges,
+  notifyDownTransitions,
+  notifyUpTransitions,
+  notifyChurnRiskTransitions,
   getDiaCustomerInfoMap,
   getIptCustomerInfoMap,
   getSharedCustomerInfoMap,
   getL3vpnCustomerInfoMap,
   statusCache,
-  isOffHours,
-  shouldSkipTracking,
-  OFF_HOURS_START,
-  OFF_HOURS_END,
 };
 

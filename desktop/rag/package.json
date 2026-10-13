@@ -1,0 +1,6 @@
+{
+  "name": "rag",
+  "private": true,
+  "type": "module",
+  "description": "Junos RAG agent code, merged into the LIT Terminal desktop app. This nested package.json exists ONLY to make Node treat every .js file under this folder as ESM (import/export) without affecting main.js/preload.js/renderer.js one level up, which stay CommonJS. Dependencies (vectra, openai, etc.) are declared in the parent desktop/package.json and resolved from its node_modules via normal upward lookup — nothing needs installing here directly."
+}

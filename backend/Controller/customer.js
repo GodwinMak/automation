@@ -112,6 +112,23 @@ exports.updateClientDbForDia = async (req, res) => {
     return res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+// Admin-only: flag/unflag a DIA customer as high profile
+exports.markHighProfile = async (req, res) => {
+  const { id } = req.params;
+  const { isHighProfile } = req.body;
+
+  try {
+    const info = await Customer.findByPk(id);
+    if (!info) return res.status(404).json({ message: "DIA customer not found" });
+
+    await info.update({ isHighProfile: !!isHighProfile });
+    return res.status(200).json({ message: "Updated successfully", data: info });
+  } catch (error) {
+    console.error("Error updating high-profile flag for DIA customer:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 // Get single DIA customer by interface name
 exports.getCustomerByInterface = async (req, res) => {
   const { interface: interfaceName } = req.params;

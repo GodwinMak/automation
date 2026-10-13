@@ -235,6 +235,7 @@ const buildMetroCommands = ({
     `set interfaces ${intf} gigether-options auto-negotiation`,
     `set interfaces ${intf} unit 0 description "{cat=DIA|nbr=${nbrDescription}|Customer=${customerName}|cid=${cidForDescription}|Mbps=${mbps}}"`,
     `set interfaces ${intf} unit 0 statistics`,
+    `set interfaces ${intf} unit 0 family ccc`,
     // L2 circuit to PRIMARY PE/BNG
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.0 virtual-circuit-id ${vcId}`,
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.0 control-word`,

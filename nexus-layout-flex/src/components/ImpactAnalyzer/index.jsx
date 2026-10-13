@@ -18,6 +18,10 @@ const ISISImpact = () => {
   const [result, setResult] = useState(null);
   const [showDown, setShowDown] = useState(false);
   const analyzerRef = useRef(null);
+  // Fingerprint of the downLinks last fed into analyzeCurrentDown() — that
+  // analysis rebuilds graphs and runs nested-loop path computations, so skip
+  // rerunning it on every 3-minute poll when nothing actually changed.
+  const lastAnalyzedDownLinksRef = useRef(null);
 
   const fetchTopology = useCallback(async () => {
     try {
@@ -37,11 +41,17 @@ const ISISImpact = () => {
           : "All links UP",
       );
       if (data.downLinks?.length > 0) {
-        const r = analyzerRef.current.analyzeCurrentDown();
-        if (r) {
-          setResult({ _type: "down", data: r });
-          setShowDown(true);
+        const fingerprint = JSON.stringify(data.downLinks);
+        if (fingerprint !== lastAnalyzedDownLinksRef.current) {
+          const r = analyzerRef.current.analyzeCurrentDown();
+          if (r) {
+            setResult({ _type: "down", data: r });
+            setShowDown(true);
+          }
+          lastAnalyzedDownLinksRef.current = fingerprint;
         }
+      } else {
+        lastAnalyzedDownLinksRef.current = null;
       }
     } catch (err) {
       console.error("[ISIS]", err);

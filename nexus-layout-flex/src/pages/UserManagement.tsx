@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   UserPlus,
@@ -66,6 +67,9 @@ interface User {
   fullName: string;
   role: "admin" | "operator" | "customer_relation";
   isActive: boolean;
+  phoneNumber: string | null;
+  canReceiveIsisSms: boolean;
+  canViewProcessMonitoring: boolean;
   lastLogin: string | null;
   createdAt: string;
 }
@@ -105,7 +109,12 @@ const UserManagement: React.FC = () => {
     fullName: "",
     role: "operator",
     isActive: true,
+    phoneNumber: "",
+    canReceiveIsisSms: false,
+    canViewProcessMonitoring: false,
   });
+
+  const PHONE_RE = /^255\d{9}$/;
 
   useEffect(() => {
     fetchUsers();
@@ -160,6 +169,15 @@ const UserManagement: React.FC = () => {
       return;
     }
 
+    if (formData.phoneNumber && !PHONE_RE.test(formData.phoneNumber)) {
+      toast({
+        title: "Validation Error",
+        description: "Phone number must start with 255 and be 12 digits (e.g. 255712345678)",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setFormLoading(true);
       await axios.post(`${API_URL}/users`, formData);
@@ -184,12 +202,24 @@ const UserManagement: React.FC = () => {
   const handleUpdate = async () => {
     if (!selectedUser) return;
 
+    if (formData.phoneNumber && !PHONE_RE.test(formData.phoneNumber)) {
+      toast({
+        title: "Validation Error",
+        description: "Phone number must start with 255 and be 12 digits (e.g. 255712345678)",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setFormLoading(true);
       const updateData: any = {
         fullName: formData.fullName,
         role: formData.role,
         isActive: formData.isActive,
+        phoneNumber: formData.phoneNumber || null,
+        canReceiveIsisSms: formData.canReceiveIsisSms,
+        canViewProcessMonitoring: formData.canViewProcessMonitoring,
       };
 
       if (formData.email !== selectedUser.email) {
@@ -250,6 +280,9 @@ const UserManagement: React.FC = () => {
       fullName: "",
       role: "operator",
       isActive: true,
+      phoneNumber: "",
+      canReceiveIsisSms: false,
+      canViewProcessMonitoring: false,
     });
     setShowPassword(false);
   };
@@ -262,6 +295,9 @@ const UserManagement: React.FC = () => {
       fullName: user.fullName || "",
       role: user.role,
       isActive: user.isActive,
+      phoneNumber: user.phoneNumber || "",
+      canReceiveIsisSms: user.canReceiveIsisSms || false,
+      canViewProcessMonitoring: user.canViewProcessMonitoring || false,
     });
     setIsEditDialogOpen(true);
   };
@@ -606,6 +642,38 @@ const UserManagement: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="phoneNumber">Phone Number</Label>
+              <Input
+                id="phoneNumber"
+                value={formData.phoneNumber}
+                onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                placeholder="255712345678"
+              />
+              <p className="text-xs text-muted-foreground">Must start with 255 (e.g. 255712345678)</p>
+            </div>
+            <div className="flex items-center justify-between space-y-0 pt-2">
+              <div>
+                <Label htmlFor="canReceiveIsisSms">ISIS Adjacency SMS Alerts</Label>
+                <p className="text-xs text-muted-foreground">Receive SMS for link down/up/high-traffic alerts</p>
+              </div>
+              <Switch
+                id="canReceiveIsisSms"
+                checked={formData.canReceiveIsisSms}
+                onCheckedChange={(checked) => setFormData({ ...formData, canReceiveIsisSms: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between space-y-0 pt-2">
+              <div>
+                <Label htmlFor="canViewProcessMonitoring">Process Monitoring Access</Label>
+                <p className="text-xs text-muted-foreground">View cron job run times and Redis lock fallback history</p>
+              </div>
+              <Switch
+                id="canViewProcessMonitoring"
+                checked={formData.canViewProcessMonitoring}
+                onCheckedChange={(checked) => setFormData({ ...formData, canViewProcessMonitoring: checked })}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -699,6 +767,38 @@ const UserManagement: React.FC = () => {
                   <SelectItem value="inactive">Inactive</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-phoneNumber">Phone Number</Label>
+              <Input
+                id="edit-phoneNumber"
+                value={formData.phoneNumber}
+                onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                placeholder="255712345678"
+              />
+              <p className="text-xs text-muted-foreground">Must start with 255 (e.g. 255712345678)</p>
+            </div>
+            <div className="flex items-center justify-between space-y-0 pt-2">
+              <div>
+                <Label htmlFor="edit-canReceiveIsisSms">ISIS Adjacency SMS Alerts</Label>
+                <p className="text-xs text-muted-foreground">Receive SMS for link down/up/high-traffic alerts</p>
+              </div>
+              <Switch
+                id="edit-canReceiveIsisSms"
+                checked={formData.canReceiveIsisSms}
+                onCheckedChange={(checked) => setFormData({ ...formData, canReceiveIsisSms: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between space-y-0 pt-2">
+              <div>
+                <Label htmlFor="edit-canViewProcessMonitoring">Process Monitoring Access</Label>
+                <p className="text-xs text-muted-foreground">View cron job run times and Redis lock fallback history</p>
+              </div>
+              <Switch
+                id="edit-canViewProcessMonitoring"
+                checked={formData.canViewProcessMonitoring}
+                onCheckedChange={(checked) => setFormData({ ...formData, canViewProcessMonitoring: checked })}
+              />
             </div>
           </div>
           <DialogFooter>

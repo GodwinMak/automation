@@ -12,9 +12,9 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
-      // Customer type: DIA, IPT, SHARED, L3VPN, FTTH
+      // Customer type: DIA, IPT, SHARED, L3VPN, FTTH, L2VPN
       customerType: {
-        type: DataTypes.ENUM("DIA", "IPT", "SHARED", "L3VPN", "FTTH"),
+        type: DataTypes.ENUM("DIA", "IPT", "SHARED", "L3VPN", "FTTH", "L2VPN"),
         allowNull: false,
       },
       // Interface identifier
@@ -42,14 +42,16 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
-      // Previous status before change
+      // Previous status before change — "mixed" only ever applies to L2VPN
+      // circuits (a multi-hop path where some but not all hops are down);
+      // every other customer type only ever writes up/down/unknown here.
       previousStatus: {
-        type: DataTypes.ENUM("up", "down", "unknown"),
+        type: DataTypes.ENUM("up", "down", "unknown", "mixed"),
         allowNull: false,
       },
       // New status after change
       newStatus: {
-        type: DataTypes.ENUM("up", "down", "unknown"),
+        type: DataTypes.ENUM("up", "down", "unknown", "mixed"),
         allowNull: false,
       },
       // Duration in the previous state (in seconds)

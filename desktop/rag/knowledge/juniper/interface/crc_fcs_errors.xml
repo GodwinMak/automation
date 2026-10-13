@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CRC/FCS Error Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="crc-fcs-errors" title="CRC/FCS Error Troubleshooting" category="interface">
+    <symptom>CRC/FCS errors are increasing on an Ethernet interface.</symptom>
+
+    <commands>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      <command>show interfaces media &lt;interface&gt; | match "Media"</command>
+    </commands>
+
+    <likelyCauses>
+      <item>Dirty/damaged fiber</item>
+      <item>Bad patch cable</item>
+      <item>Bad optic</item>
+      <item>Poor optical power</item>
+      <item>Copper cabling problem</item>
+      <item>Speed/duplex mismatch on supported interfaces</item>
+      <item>FEC mismatch on high-speed Ethernet</item>
+      <item>Hardware failure</item>
+    </likelyCauses>
+
+    <workflow>
+      <step order="1">Confirm counters are increasing.</step>
+      <step order="2">Check whether errors are receive-side or transmit-side.</step>
+      <step order="3">Inspect local optics.</step>
+      <step order="4">Check remote interface counters.</step>
+      <step order="5">Swap the patch cable or optic where operationally safe.</step>
+      <step order="6">Recheck counters.</step>
+    </workflow>
+
+    <rule>CRC/FCS errors are normally treated as a Layer-1 problem first.</rule>
+  </topic>
+</knowledgeTopic>

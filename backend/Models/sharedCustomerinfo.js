@@ -36,6 +36,10 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER, // capacity in Mbps
       allowNull: true,
     },
+    isHighProfile: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   });
 };
 

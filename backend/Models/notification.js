@@ -22,7 +22,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
     },
     customerType: {
-      type: DataTypes.ENUM("DIA", "IPT", "Shared", "FTTH"),
+      type: DataTypes.ENUM("DIA", "IPT", "Shared", "FTTH", "L3VPN", "ISIS", "L2VPN"),
       allowNull: false,
     },
     interface: {

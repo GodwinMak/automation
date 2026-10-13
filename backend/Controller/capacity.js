@@ -7,6 +7,8 @@ const IptCustomerInfo = db.iptcustomerinfos;
 const IptCustomer = db.iptcustomers;
 const SharedCustomerInfo = db.sharedcustomerinfos;
 const SharedCustomer = db.sharedcustomers;
+const L3vpnCustomerInfo = db.l3vpncustomerinfos;
+const L3vpnCustomer = db.l3vpncustomers;
 
 // Get capacity summary by NBR (switch)
 exports.getCapacitySummary = async (req, res) => {
@@ -18,7 +20,7 @@ exports.getCapacitySummary = async (req, res) => {
   const sortOrder = req.query.sortOrder || "desc";
 
   try {
-    // Run all 9 capacity queries in parallel
+    // Run all 12 capacity queries in parallel
     const [
       diaCapacity,
       diaUpCapacity,
@@ -29,6 +31,9 @@ exports.getCapacitySummary = async (req, res) => {
       sharedCapacity,
       sharedUpCapacity,
       sharedDownCapacity,
+      l3vpnCapacity,
+      l3vpnUpCapacity,
+      l3vpnDownCapacity,
     ] = await Promise.all([
       // DIA capacity by NBR (total)
       CustomerInfo.findAll({
@@ -135,6 +140,41 @@ exports.getCapacitySummary = async (req, res) => {
         group: ["nbr"],
         raw: true,
       }),
+      // L3VPN capacity by NBR (total)
+      L3vpnCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("l3vpncustomerinfo.downmbps")), "l3vpn_capacity"],
+          [fn("COUNT", col("l3vpncustomerinfo.id")), "l3vpn_customers"],
+        ],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // L3VPN UP capacity by NBR
+      L3vpnCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("l3vpncustomerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("l3vpncustomerinfo.id")), "count"],
+        ],
+        include: [{ model: L3vpnCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
+      // L3VPN DOWN capacity by NBR
+      L3vpnCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("l3vpncustomerinfo.downmbps")), "capacity"],
+          [fn("COUNT", col("l3vpncustomerinfo.id")), "count"],
+        ],
+        include: [{ model: L3vpnCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        where: { nbr: { [Op.like]: `%${searchQuery}%` } },
+        group: ["nbr"],
+        raw: true,
+      }),
     ]);
 
     // Create lookup maps for UP/DOWN data
@@ -144,9 +184,17 @@ exports.getCapacitySummary = async (req, res) => {
     const iptDownMap = new Map(iptDownCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
     const sharedUpMap = new Map(sharedUpCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
     const sharedDownMap = new Map(sharedDownCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
+    const l3vpnUpMap = new Map(l3vpnUpCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
+    const l3vpnDownMap = new Map(l3vpnDownCapacity.map(i => [i.nbr, { capacity: parseInt(i.capacity) || 0, count: parseInt(i.count) || 0 }]));
 
     // Merge all data by NBR
     const capacityMap = new Map();
+    const emptyRow = () => ({
+      dia_capacity: 0, dia_customers: 0, dia_up_capacity: 0, dia_up_count: 0, dia_down_capacity: 0, dia_down_count: 0,
+      ipt_capacity: 0, ipt_customers: 0, ipt_up_capacity: 0, ipt_up_count: 0, ipt_down_capacity: 0, ipt_down_count: 0,
+      shared_capacity: 0, shared_customers: 0, shared_up_capacity: 0, shared_up_count: 0, shared_down_capacity: 0, shared_down_count: 0,
+      l3vpn_capacity: 0, l3vpn_customers: 0, l3vpn_up_capacity: 0, l3vpn_up_count: 0, l3vpn_down_capacity: 0, l3vpn_down_count: 0,
+    });
 
     // Process DIA
     diaCapacity.forEach((item) => {
@@ -155,24 +203,13 @@ exports.getCapacitySummary = async (req, res) => {
       const downData = diaDownMap.get(item.nbr) || { capacity: 0, count: 0 };
       capacityMap.set(item.nbr, {
         nbr: item.nbr,
+        ...emptyRow(),
         dia_capacity: parseInt(item.dia_capacity) || 0,
         dia_customers: parseInt(item.dia_customers) || 0,
         dia_up_capacity: upData.capacity,
         dia_up_count: upData.count,
         dia_down_capacity: downData.capacity,
         dia_down_count: downData.count,
-        ipt_capacity: 0,
-        ipt_customers: 0,
-        ipt_up_capacity: 0,
-        ipt_up_count: 0,
-        ipt_down_capacity: 0,
-        ipt_down_count: 0,
-        shared_capacity: 0,
-        shared_customers: 0,
-        shared_up_capacity: 0,
-        shared_up_count: 0,
-        shared_down_capacity: 0,
-        shared_down_count: 0,
       });
     });
 
@@ -192,24 +229,13 @@ exports.getCapacitySummary = async (req, res) => {
       } else {
         capacityMap.set(item.nbr, {
           nbr: item.nbr,
-          dia_capacity: 0,
-          dia_customers: 0,
-          dia_up_capacity: 0,
-          dia_up_count: 0,
-          dia_down_capacity: 0,
-          dia_down_count: 0,
+          ...emptyRow(),
           ipt_capacity: parseInt(item.ipt_capacity) || 0,
           ipt_customers: parseInt(item.ipt_customers) || 0,
           ipt_up_capacity: upData.capacity,
           ipt_up_count: upData.count,
           ipt_down_capacity: downData.capacity,
           ipt_down_count: downData.count,
-          shared_capacity: 0,
-          shared_customers: 0,
-          shared_up_capacity: 0,
-          shared_up_count: 0,
-          shared_down_capacity: 0,
-          shared_down_count: 0,
         });
       }
     });
@@ -230,18 +256,7 @@ exports.getCapacitySummary = async (req, res) => {
       } else {
         capacityMap.set(item.nbr, {
           nbr: item.nbr,
-          dia_capacity: 0,
-          dia_customers: 0,
-          dia_up_capacity: 0,
-          dia_up_count: 0,
-          dia_down_capacity: 0,
-          dia_down_count: 0,
-          ipt_capacity: 0,
-          ipt_customers: 0,
-          ipt_up_capacity: 0,
-          ipt_up_count: 0,
-          ipt_down_capacity: 0,
-          ipt_down_count: 0,
+          ...emptyRow(),
           shared_capacity: parseInt(item.shared_capacity) || 0,
           shared_customers: parseInt(item.shared_customers) || 0,
           shared_up_capacity: upData.capacity,
@@ -252,15 +267,42 @@ exports.getCapacitySummary = async (req, res) => {
       }
     });
 
+    // Process L3VPN
+    l3vpnCapacity.forEach((item) => {
+      if (!item.nbr) return;
+      const upData = l3vpnUpMap.get(item.nbr) || { capacity: 0, count: 0 };
+      const downData = l3vpnDownMap.get(item.nbr) || { capacity: 0, count: 0 };
+      if (capacityMap.has(item.nbr)) {
+        const existing = capacityMap.get(item.nbr);
+        existing.l3vpn_capacity = parseInt(item.l3vpn_capacity) || 0;
+        existing.l3vpn_customers = parseInt(item.l3vpn_customers) || 0;
+        existing.l3vpn_up_capacity = upData.capacity;
+        existing.l3vpn_up_count = upData.count;
+        existing.l3vpn_down_capacity = downData.capacity;
+        existing.l3vpn_down_count = downData.count;
+      } else {
+        capacityMap.set(item.nbr, {
+          nbr: item.nbr,
+          ...emptyRow(),
+          l3vpn_capacity: parseInt(item.l3vpn_capacity) || 0,
+          l3vpn_customers: parseInt(item.l3vpn_customers) || 0,
+          l3vpn_up_capacity: upData.capacity,
+          l3vpn_up_count: upData.count,
+          l3vpn_down_capacity: downData.capacity,
+          l3vpn_down_count: downData.count,
+        });
+      }
+    });
+
     // Convert to array and calculate totals
     let results = Array.from(capacityMap.values()).map((item) => ({
       ...item,
-      total_capacity: item.dia_capacity + item.ipt_capacity + item.shared_capacity,
-      total_customers: item.dia_customers + item.ipt_customers + item.shared_customers,
-      total_up_capacity: item.dia_up_capacity + item.ipt_up_capacity + item.shared_up_capacity,
-      total_up_count: item.dia_up_count + item.ipt_up_count + item.shared_up_count,
-      total_down_capacity: item.dia_down_capacity + item.ipt_down_capacity + item.shared_down_capacity,
-      total_down_count: item.dia_down_count + item.ipt_down_count + item.shared_down_count,
+      total_capacity: item.dia_capacity + item.ipt_capacity + item.shared_capacity + item.l3vpn_capacity,
+      total_customers: item.dia_customers + item.ipt_customers + item.shared_customers + item.l3vpn_customers,
+      total_up_capacity: item.dia_up_capacity + item.ipt_up_capacity + item.shared_up_capacity + item.l3vpn_up_capacity,
+      total_up_count: item.dia_up_count + item.ipt_up_count + item.shared_up_count + item.l3vpn_up_count,
+      total_down_capacity: item.dia_down_capacity + item.ipt_down_capacity + item.shared_down_capacity + item.l3vpn_down_capacity,
+      total_down_count: item.dia_down_count + item.ipt_down_count + item.shared_down_count + item.l3vpn_down_count,
     }));
 
     // Sort
@@ -282,20 +324,24 @@ exports.getCapacitySummary = async (req, res) => {
         total_dia_capacity: acc.total_dia_capacity + item.dia_capacity,
         total_ipt_capacity: acc.total_ipt_capacity + item.ipt_capacity,
         total_shared_capacity: acc.total_shared_capacity + item.shared_capacity,
+        total_l3vpn_capacity: acc.total_l3vpn_capacity + item.l3vpn_capacity,
         total_capacity: acc.total_capacity + item.total_capacity,
         total_dia_customers: acc.total_dia_customers + item.dia_customers,
         total_ipt_customers: acc.total_ipt_customers + item.ipt_customers,
         total_shared_customers: acc.total_shared_customers + item.shared_customers,
+        total_l3vpn_customers: acc.total_l3vpn_customers + item.l3vpn_customers,
         total_customers: acc.total_customers + item.total_customers,
       }),
       {
         total_dia_capacity: 0,
         total_ipt_capacity: 0,
         total_shared_capacity: 0,
+        total_l3vpn_capacity: 0,
         total_capacity: 0,
         total_dia_customers: 0,
         total_ipt_customers: 0,
         total_shared_customers: 0,
+        total_l3vpn_customers: 0,
         total_customers: 0,
       }
     );
@@ -316,7 +362,7 @@ exports.getCapacitySummary = async (req, res) => {
 // Get overall capacity stats
 exports.getCapacityStats = async (req, res) => {
   try {
-    // Run all 15 independent stat queries in parallel
+    // Run all 21 independent stat queries in parallel
     const [
       diaStats,
       diaUpCount,
@@ -333,9 +379,15 @@ exports.getCapacityStats = async (req, res) => {
       sharedDownCount,
       sharedUpStats,
       sharedDownStats,
+      l3vpnStats,
+      l3vpnUpCount,
+      l3vpnDownCount,
+      l3vpnUpStats,
+      l3vpnDownStats,
       uniqueSwitches,
       iptSwitches,
       sharedSwitches,
+      l3vpnSwitches,
     ] = await Promise.all([
       // DIA totals
       CustomerInfo.findOne({
@@ -403,10 +455,33 @@ exports.getCapacityStats = async (req, res) => {
         include: [{ model: SharedCustomer, attributes: [], where: { operationalStatus: "down" } }],
         raw: true,
       }),
+      // L3VPN totals
+      L3vpnCustomerInfo.findOne({
+        attributes: [
+          [fn("SUM", col("downmbps")), "total_capacity"],
+          [fn("COUNT", col("id")), "total_customers"],
+        ],
+        raw: true,
+      }),
+      L3vpnCustomer.count({ where: { operationalStatus: "up" } }),
+      L3vpnCustomer.count({ where: { operationalStatus: "down" } }),
+      // L3VPN UP capacity
+      L3vpnCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("l3vpncustomerinfo.downmbps")), "capacity"]],
+        include: [{ model: L3vpnCustomer, attributes: [], where: { operationalStatus: "up" } }],
+        raw: true,
+      }),
+      // L3VPN DOWN capacity
+      L3vpnCustomerInfo.findOne({
+        attributes: [[fn("SUM", col("l3vpncustomerinfo.downmbps")), "capacity"]],
+        include: [{ model: L3vpnCustomer, attributes: [], where: { operationalStatus: "down" } }],
+        raw: true,
+      }),
       // Unique switch counts
       CustomerInfo.count({ distinct: true, col: "nbr" }),
       IptCustomerInfo.count({ distinct: true, col: "nbr" }),
       SharedCustomerInfo.count({ distinct: true, col: "nbr" }),
+      L3vpnCustomerInfo.count({ distinct: true, col: "nbr" }),
     ]);
 
     // Calculate capacity totals
@@ -418,6 +493,9 @@ exports.getCapacityStats = async (req, res) => {
 
     const sharedUpCapacity = parseInt(sharedUpStats?.capacity) || 0;
     const sharedDownCapacity = parseInt(sharedDownStats?.capacity) || 0;
+
+    const l3vpnUpCapacity = parseInt(l3vpnUpStats?.capacity) || 0;
+    const l3vpnDownCapacity = parseInt(l3vpnDownStats?.capacity) || 0;
 
     res.status(200).json({
       dia: {
@@ -444,17 +522,26 @@ exports.getCapacityStats = async (req, res) => {
         upCapacity: sharedUpCapacity,
         downCapacity: sharedDownCapacity,
       },
+      l3vpn: {
+        capacity: parseInt(l3vpnStats?.total_capacity) || 0,
+        customers: l3vpnUpCount + l3vpnDownCount, // Total from L3vpnCustomer table
+        up: l3vpnUpCount,
+        down: l3vpnDownCount,
+        upCapacity: l3vpnUpCapacity,
+        downCapacity: l3vpnDownCapacity,
+      },
       total: {
         capacity:
           (parseInt(diaStats?.total_capacity) || 0) +
           (parseInt(iptStats?.total_capacity) || 0) +
-          (parseInt(sharedStats?.total_capacity) || 0),
-        customers: (diaUpCount + diaDownCount) + (iptUpCount + iptDownCount) + (sharedUpCount + sharedDownCount),
-        up: diaUpCount + iptUpCount + sharedUpCount,
-        down: diaDownCount + iptDownCount + sharedDownCount,
-        upCapacity: diaUpCapacity + iptUpCapacity + sharedUpCapacity,
-        downCapacity: diaDownCapacity + iptDownCapacity + sharedDownCapacity,
-        switches: Math.max(uniqueSwitches, iptSwitches, sharedSwitches),
+          (parseInt(sharedStats?.total_capacity) || 0) +
+          (parseInt(l3vpnStats?.total_capacity) || 0),
+        customers: (diaUpCount + diaDownCount) + (iptUpCount + iptDownCount) + (sharedUpCount + sharedDownCount) + (l3vpnUpCount + l3vpnDownCount),
+        up: diaUpCount + iptUpCount + sharedUpCount + l3vpnUpCount,
+        down: diaDownCount + iptDownCount + sharedDownCount + l3vpnDownCount,
+        upCapacity: diaUpCapacity + iptUpCapacity + sharedUpCapacity + l3vpnUpCapacity,
+        downCapacity: diaDownCapacity + iptDownCapacity + sharedDownCapacity + l3vpnDownCapacity,
+        switches: Math.max(uniqueSwitches, iptSwitches, sharedSwitches, l3vpnSwitches),
       },
     });
   } catch (error) {
@@ -466,7 +553,7 @@ exports.getCapacityStats = async (req, res) => {
 // Get top switches by capacity
 exports.getTopSwitches = async (req, res) => {
   const limit = parseInt(req.query.limit) || 10;
-  const type = req.query.type || "all"; // all, dia, ipt, shared
+  const type = req.query.type || "all"; // all, dia, ipt, shared, l3vpn
 
   try {
     let results = [];
@@ -517,6 +604,22 @@ exports.getTopSwitches = async (req, res) => {
         raw: true,
       });
       results.push(...sharedTop.map((r) => ({ ...r, type: "Shared" })));
+    }
+
+    if (type === "all" || type === "l3vpn") {
+      const l3vpnTop = await L3vpnCustomerInfo.findAll({
+        attributes: [
+          "nbr",
+          [fn("SUM", col("downmbps")), "capacity"],
+          [fn("COUNT", col("l3vpncustomerinfo.id")), "customers"],
+        ],
+        where: { nbr: { [Op.ne]: null } },
+        group: ["nbr"],
+        order: [[literal("capacity"), "DESC"]],
+        limit: limit,
+        raw: true,
+      });
+      results.push(...l3vpnTop.map((r) => ({ ...r, type: "L3VPN" })));
     }
 
     // Sort by capacity and limit

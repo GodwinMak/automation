@@ -30,6 +30,42 @@ const getTargetSwitches = (switchName) => {
   if (hasPE) return pe;
   return switches; // fallback
 };
+const DIA_TEMP_JOB_PREFIX = "temp-upgrade:dia:";
+const getDiaTempJobName = (intfName) => `${DIA_TEMP_JOB_PREFIX}${intfName}`;
+
+const scheduleDiaTemporaryRevert = ({ intfName, switchName, old_upmbps, old_downmbps, customer }) => {
+  const jobName = getDiaTempJobName(intfName);
+  const existingJob = schedule.scheduledJobs[jobName];
+  if (existingJob) existingJob.cancel();
+
+  schedule.scheduleJob(jobName, customer.expires_at, async () => {
+    console.log(`[Auto-Downgrade] Downgrading ${intfName}`);
+    try {
+      for (const sw of getTargetSwitches(switchName)) {
+        console.log(`[Downgrade] Reverting on ${sw.name} (${sw.host})`);
+        await executeJunosUpgrade(
+          sw.host,
+          { username: process.env.SSH_USERNAME, password: process.env.SSH_PASSWORD },
+          old_upmbps,
+          old_downmbps,
+          intfName
+        );
+      }
+
+      await customer.update({
+        upmbps: old_upmbps,
+        downmbps: old_downmbps,
+        old_upmbps: null,
+        old_downmbps: null,
+        upgrade_type: null,
+        expires_at: null,
+      });
+      console.log(`[Auto-Downgrade] Completed for ${intfName}`);
+    } catch (error) {
+      console.error(`[Auto-Downgrade] Error on ${intfName}:`, error.message);
+    }
+  });
+};
 // Helper to build commands for both directions
 const buildPolicerCommands = (interfaceName, upmbps, downmbps) => {
   // Split interface name and unit
@@ -40,18 +76,53 @@ const buildPolicerCommands = (interfaceName, upmbps, downmbps) => {
 };
 
 // Helper to run a complex sequence of Junos commands
+// How long to wait for the device to return one of the expected strings
+// ("configuration check succeeds" / "must be a logical interface policer")
+// before giving up. Without this, an SSH shell session that opens fine but
+// never produces either expected string (unexpected CLI banner/prompt text,
+// a policer commit that's a silent no-op, a hung device) leaves the promise
+// unresolved forever — and since rescheduleJobs awaits each customer
+// sequentially in a for-loop, one hung customer blocks every customer
+// behind it in the queue, indefinitely, with no error ever logged.
+const SHELL_COMMAND_TIMEOUT_MS = 30000;
+
+// Same problem as SHELL_COMMAND_TIMEOUT_MS above, but for plain exec()
+// commands (runCommand below): readyTimeout only bounds the SSH handshake.
+// Once conn.exec() opens a channel, nothing bounds how long we wait for its
+// "close" event. A device that accepts the exec but never closes the
+// channel (busy CPU, paginated/interactive output, a silently stuck CLI
+// process) leaves the promise unresolved and the connection open forever —
+// which is exactly the kind of leaked session that can exhaust a router's
+// limited concurrent SSH session pool and lock out real admins.
+const EXEC_COMMAND_TIMEOUT_MS = 30000;
+
 const executeJunosUpgrade = (host, sshConfig, upmbps, downmbps, intfName) => {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     let stream;
     let result = "";
+    let isDone = false;
+
+    const timeoutTimer = setTimeout(() => {
+      finish(reject, new Error(`Timed out waiting for device response on ${host} (${SHELL_COMMAND_TIMEOUT_MS / 1000}s)`));
+      conn.end();
+    }, SHELL_COMMAND_TIMEOUT_MS);
+
+    // Ensures resolve/reject only ever fires once and always clears the
+    // timeout timer, regardless of which path (success, device error,
+    // connection error, or the timeout itself) gets there first.
+    const finish = (fn, arg) => {
+      if (isDone) return;
+      isDone = true;
+      clearTimeout(timeoutTimer);
+      fn(arg);
+    };
 
     conn
       .on("ready", () => {
         conn.shell((err, shellStream) => {
-          if (err) return reject(err);
+          if (err) return finish(reject, err);
           stream = shellStream;
-          let isDone = false;
 
           // This helper will contain our command logic
           const runCommands = (commandList, thenCallback) => {
@@ -74,8 +145,7 @@ const executeJunosUpgrade = (host, sshConfig, upmbps, downmbps, intfName) => {
             if (result.includes("configuration check succeeds")) {
               console.log("Policer is valid. Committing and quitting.");
               stream.write("commit and-quit\n");
-              isDone = true; // Set flag to prevent re-processing
-              resolve();
+              finish(resolve);
             } else if (result.includes("must be a logical interface policer")) {
               console.log("Policer not found. Creating and re-trying.");
               const createPolicerCmds = [
@@ -98,17 +168,16 @@ const executeJunosUpgrade = (host, sshConfig, upmbps, downmbps, intfName) => {
               stream.write(downCmd + "\n");
               stream.write("commit and-quit\n");
 
-              isDone = true;
-              resolve(); // Resolve after sending all commands
+              finish(resolve); // Resolve after sending all commands
             }
           });
 
           stream.on("close", (hadError) => {
             conn.end();
             if (hadError && !isDone) {
-              reject(new Error("SSH session closed unexpectedly."));
+              finish(reject, new Error("SSH session closed unexpectedly."));
             } else if (!isDone) {
-              reject(new Error("No valid response received from device."));
+              finish(reject, new Error("No valid response received from device."));
             }
           });
 
@@ -125,6 +194,9 @@ const executeJunosUpgrade = (host, sshConfig, upmbps, downmbps, intfName) => {
           stream.write("commit check\n");
         });
       })
+      .on("error", (err) =>
+        finish(reject, new Error(`SSH connection error to ${host}: ${err.message}`))
+      )
       .connect({ host, ...sshConfig });
   });
 };
@@ -152,12 +224,26 @@ const runCommand = (host, cmd, sshConfig) => {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     let result = "";
+    let isDone = false;
+
+    const timeoutTimer = setTimeout(() => {
+      finish(reject, new Error(`Timed out waiting for command output from ${host} (${EXEC_COMMAND_TIMEOUT_MS / 1000}s): ${cmd}`));
+      conn.end();
+    }, EXEC_COMMAND_TIMEOUT_MS);
+
+    const finish = (fn, arg) => {
+      if (isDone) return;
+      isDone = true;
+      clearTimeout(timeoutTimer);
+      fn(arg);
+    };
+
     conn
       .on("ready", () => {
         conn.exec(cmd, (err, stream) => {
           if (err) {
             conn.end();
-            return reject(new Error(`Command execution error: ${err.message}`));
+            return finish(reject, new Error(`Command execution error: ${err.message}`));
           }
           stream
             .on("data", (data) => {
@@ -166,12 +252,12 @@ const runCommand = (host, cmd, sshConfig) => {
             .on("close", () => {
               conn.end();
               // console.log(`Command output for ${cmd}:`, result.trim()); // Debug line
-              resolve(result.trim());
+              finish(resolve, result.trim());
             });
         });
       })
       .on("error", (err) =>
-        reject(new Error(`SSH connection error to ${host}: ${err.message}`))
+        finish(reject, new Error(`SSH connection error to ${host}: ${err.message}`))
       )
       .connect({ host, ...sshConfig });
   });
@@ -216,12 +302,24 @@ const excuteJunosChangeDesription = async (
     return new Promise((resolve, reject) => {
       const conn = new Client();
       let result = "";
+      let isDone = false;
+
+      const timeoutTimer = setTimeout(() => {
+        finish(reject, new Error(`Timed out waiting for device response on ${host} (${SHELL_COMMAND_TIMEOUT_MS / 1000}s)`));
+        conn.end();
+      }, SHELL_COMMAND_TIMEOUT_MS);
+
+      const finish = (fn, arg) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(timeoutTimer);
+        fn(arg);
+      };
 
       conn
         .on("ready", () => {
           conn.shell((err, stream) => {
-            if (err) return reject(err);
-            let isDone = false;
+            if (err) return finish(reject, err);
 
             stream.on("data", (data) => {
               result += data.toString();
@@ -232,21 +330,21 @@ const excuteJunosChangeDesription = async (
                   `[Description Change] Commit successful on ${host}.`
                 );
                 stream.write("commit and-quit\n");
-                isDone = true;
-                resolve();
+                finish(resolve);
               }
             });
 
             stream.on("close", (hadError) => {
               conn.end();
               if (hadError && !isDone) {
-                reject(
+                finish(
+                  reject,
                   new Error(
                     "SSH session closed unexpectedly during config commit."
                   )
                 );
               } else if (!isDone) {
-                reject(new Error("Config commit failed or timed out."));
+                finish(reject, new Error("Config commit failed or timed out."));
               }
             });
 
@@ -257,6 +355,9 @@ const excuteJunosChangeDesription = async (
             stream.write("commit check\n");
           });
         })
+        .on("error", (err) =>
+          finish(reject, new Error(`SSH connection error to ${host}: ${err.message}`))
+        )
         .connect({ host, ...sshConfig });
     });
   } catch (error) {
@@ -373,12 +474,24 @@ const excuteJunusNeighborDescription = async (
     return new Promise((resolve, reject) => {
       const conn = new Client();
       let result = "";
+      let isDone = false;
+
+      const timeoutTimer = setTimeout(() => {
+        finish(reject, new Error(`Timed out waiting for device response on ${host} (${SHELL_COMMAND_TIMEOUT_MS / 1000}s)`));
+        conn.end();
+      }, SHELL_COMMAND_TIMEOUT_MS);
+
+      const finish = (fn, arg) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(timeoutTimer);
+        fn(arg);
+      };
 
       conn
         .on("ready", () => {
           conn.shell((err, stream) => {
-            if (err) return reject(err);
-            let isDone = false;
+            if (err) return finish(reject, err);
 
             stream.on("data", (data) => {
               result += data.toString();
@@ -389,21 +502,21 @@ const excuteJunusNeighborDescription = async (
                   `[Description Change] Commit successful on ${host}.`
                 );
                 stream.write("commit and-quit\n");
-                isDone = true;
-                resolve();
+                finish(resolve);
               }
             });
 
             stream.on("close", (hadError) => {
               conn.end();
               if (hadError && !isDone) {
-                reject(
+                finish(
+                  reject,
                   new Error(
                     "SSH session closed unexpectedly during config commit."
                   )
                 );
               } else if (!isDone) {
-                reject(new Error("Config commit failed or timed out."));
+                finish(reject, new Error("Config commit failed or timed out."));
               }
             });
 
@@ -414,6 +527,9 @@ const excuteJunusNeighborDescription = async (
             stream.write("commit check\n");
           });
         })
+        .on("error", (err) =>
+          finish(reject, new Error(`SSH connection error to ${host}: ${err.message}`))
+        )
         .connect({ host, ...sshConfig });
     });
   } catch (error) {
@@ -616,35 +732,12 @@ exports.upgradeCustomer = async (req, res) => {
         expires_at: expiresAt,
       });
 
-      schedule.scheduleJob(expiresAt, async () => {
-        console.log(`[Auto-Downgrade] Downgrading ${intfName}`);
-        try {
-          for (const sw of switches) {
-            console.log(`[Downgrade] Reverting on ${sw.name} (${sw.host})`);
-            await executeJunosUpgrade(
-              sw.host,
-              { username: process.env.SSH_USERNAME, password: process.env.SSH_PASSWORD },
-              old_upmbps,
-              old_downmbps,
-              intfName
-            );
-          }
-
-          await customer.update({
-            upmbps: old_upmbps,
-            downmbps: old_downmbps,
-            old_upmbps: null,
-            old_downmbps: null,
-            upgrade_type: null,
-            expires_at: null,
-          });
-          console.log(`[Auto-Downgrade] Completed for ${intfName}`);
-        } catch (error) {
-          console.error(
-            `[Auto-Downgrade] Error on ${intfName}:`,
-            error.message
-          );
-        }
+      scheduleDiaTemporaryRevert({
+        intfName,
+        switchName,
+        old_upmbps,
+        old_downmbps,
+        customer,
       });
     } else {
       return res.status(400).json({ message: "Invalid upgrade type" });
@@ -657,6 +750,159 @@ exports.upgradeCustomer = async (req, res) => {
   }
 };
 
+exports.editTemporaryUpgrade = async (req, res) => {
+  const {
+    interface: intfName,
+    username,
+    password,
+    type,
+    duration,
+    expires_at,
+    new_upmbps,
+    new_downmbps,
+  } = req.body;
+
+  if (!intfName) {
+    return res.status(400).json({ message: "interface is required" });
+  }
+
+  try {
+    const customer = await customerinfos.findOne({
+      where: { interface: intfName },
+      include: [{ model: db.diacustomers, attributes: ["switchName"] }],
+    });
+
+    if (!customer) return res.status(404).json({ message: "Customer not found" });
+    if (customer.upgrade_type !== "temporary") {
+      return res.status(400).json({ message: "Only temporary upgrades/downgrades can be edited" });
+    }
+
+    const switchName =
+      (customer.diacustomers && customer.diacustomers.switchName) ||
+      (customer.diacustomer && customer.diacustomer.switchName) ||
+      customer.switchName ||
+      "";
+
+    const nextUp =
+      new_upmbps !== undefined && new_upmbps !== null
+        ? parseInt(new_upmbps, 10)
+        : customer.upmbps;
+    const nextDown =
+      new_downmbps !== undefined && new_downmbps !== null
+        ? parseInt(new_downmbps, 10)
+        : customer.downmbps;
+
+    if (!Number.isFinite(nextUp) || !Number.isFinite(nextDown) || nextUp <= 0 || nextDown <= 0) {
+      return res.status(400).json({ message: "Invalid capacity values" });
+    }
+
+    if (nextUp !== customer.upmbps || nextDown !== customer.downmbps) {
+      if (!username || !password) {
+        return res.status(400).json({
+          message: "username and password are required when changing capacity",
+        });
+      }
+      for (const sw of getTargetSwitches(switchName)) {
+        await executeJunosUpgrade(sw.host, { username, password }, nextUp, nextDown, intfName);
+      }
+    }
+
+    const updates = { upmbps: nextUp, downmbps: nextDown };
+    if (type === "permanent") {
+      updates.upgrade_type = "permanent";
+      updates.expires_at = null;
+      const existingJob = schedule.scheduledJobs[getDiaTempJobName(intfName)];
+      if (existingJob) existingJob.cancel();
+    } else {
+      updates.upgrade_type = "temporary";
+      let nextExpiry = customer.expires_at ? new Date(customer.expires_at) : null;
+      if (duration) nextExpiry = new Date(Date.now() + ms(duration));
+      if (expires_at) nextExpiry = new Date(expires_at);
+
+      if (!nextExpiry || Number.isNaN(nextExpiry.getTime()) || nextExpiry <= new Date()) {
+        return res.status(400).json({ message: "Provide a valid future expires_at or duration" });
+      }
+
+      updates.expires_at = nextExpiry;
+    }
+
+    await customer.update(updates);
+
+    if (updates.upgrade_type === "temporary") {
+      scheduleDiaTemporaryRevert({
+        intfName,
+        switchName,
+        old_upmbps: customer.old_upmbps,
+        old_downmbps: customer.old_downmbps,
+        customer,
+      });
+    }
+
+    return res.json({ message: "Temporary upgrade updated successfully", customer });
+  } catch (error) {
+    console.error("Error editing temporary upgrade:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Combined audit log of every upgrade/downgrade ever recorded across DIA,
+// IPT and L3VPN (each type logs to its own *upgradeinfos table — see
+// Models/upgradeinfo.js, iptupgradeinfo.js, l3vpnupgradeinfo.js — created
+// once per action in upgradeCustomer above and never updated afterwards).
+// SHARED has no upgrade_type/upgradeinfos concept and L2VPN has no
+// customerinfo/upgrade concept at all, so neither type can appear here.
+exports.getAllUpgrades = async (req, res) => {
+  try {
+    const [diaRows, iptRows, l3vpnRows] = await Promise.all([
+      db.upgradeinfos.findAll({
+        include: [{ model: db.customerinfos, attributes: ["customerName", "nbr"], required: false }],
+        order: [["start_date", "DESC"]],
+      }),
+      db.iptupgradeinfos.findAll({
+        include: [{ model: db.iptcustomerinfos, attributes: ["customerName", "nbr"], required: false }],
+        order: [["start_date", "DESC"]],
+      }),
+      db.l3vpnupgradeinfos.findAll({
+        include: [{ model: db.l3vpncustomerinfos, attributes: ["customerName", "nbr"], required: false }],
+        order: [["start_date", "DESC"]],
+      }),
+    ]);
+
+    const tag = (rows, customerType, nestedKey) =>
+      rows.map((row) => {
+        const json = row.toJSON();
+        const nested = json[nestedKey];
+        return {
+          id: json.id,
+          customerType,
+          customerName: nested?.customerName ?? null,
+          nbr: nested?.nbr ?? null,
+          interface: json.interface,
+          account_manager: json.account_manager,
+          current_bandwidth: json.current_bandwidth,
+          upgrade_bandwidth: json.upgrade_bandwidth,
+          downgrade_bandwidth: json.downgrade_bandwidth,
+          approved_by: json.approved_by,
+          done_by: json.done_by,
+          start_date: json.start_date,
+          end_date: json.end_date,
+          downgrade_date: json.downgrade_date,
+        };
+      });
+
+    const upgrades = [
+      ...tag(diaRows, "DIA", "customerinfo"),
+      ...tag(iptRows, "IPT", "iptcustomerinfo"),
+      ...tag(l3vpnRows, "L3VPN", "l3vpncustomerinfo"),
+    ].sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+
+    res.status(200).json({ upgrades, totalItems: upgrades.length });
+  } catch (error) {
+    console.error("Error fetching upgrade history:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 exports.rescheduleJobs = async () => {
   const sshConfig = {
     username: process.env.SSH_USERNAME,
@@ -665,6 +911,12 @@ exports.rescheduleJobs = async () => {
   try {
     const temporaryUpgrades = await customerinfos.findAll({
       where: { upgrade_type: "temporary" },
+      include: [
+        {
+          model: db.diacustomers,
+          attributes: ["switchName"],
+        },
+      ],
     });
 
     const now = new Date();
@@ -681,11 +933,25 @@ exports.rescheduleJobs = async () => {
 
       if (!expires_at) continue;
 
+      // Same target-switch resolution upgradeCustomer uses for the original
+      // upgrade (see line ~518) — a customer whose upgrade actually went to
+      // PE devices (getTargetSwitches returns PE-only, or BNG+PE, depending
+      // on switchName) must be reverted on those SAME devices, not always
+      // the hardcoded BNG-only `switches` constant. Reverting on the wrong
+      // switch silently finds nothing to revert and previously hung forever
+      // waiting for CLI output that could never appear.
+      const switchName =
+        (customer.diacustomers && customer.diacustomers.switchName) ||
+        (customer.diacustomer && customer.diacustomer.switchName) ||
+        customer.switchName ||
+        "";
+      const targetSwitches = getTargetSwitches(switchName);
+
       if (new Date(expires_at) <= now) {
         // Expired → downgrade immediately
         console.log(`[Fix] Immediate downgrade for expired ${intfName}`);
         try {
-          for (const sw of switches) {
+          for (const sw of targetSwitches) {
             console.log(`[Downgrade] Reverting on ${sw.name} (${sw.host})`);
             await executeJunosUpgrade(
               sw.host,
@@ -715,34 +981,12 @@ exports.rescheduleJobs = async () => {
         console.log(
           `[Rescheduler] Rescheduling downgrade for ${intfName} at ${expires_at}`
         );
-        schedule.scheduleJob(expires_at, async () => {
-          console.log(`[Auto-Downgrade] Downgrading ${intfName}`);
-          try {
-            for (const sw of switches) {
-              console.log(`[Downgrade] Reverting on ${sw.name} (${sw.host})`);
-              await executeJunosUpgrade(
-                sw.host,
-                sshConfig,
-                old_upmbps,
-                old_downmbps,
-                intfName
-              );
-            }
-            await customer.update({
-              upmbps: old_upmbps,
-              downmbps: old_downmbps,
-              old_upmbps: null,
-              old_downmbps: null,
-              upgrade_type: null,
-              expires_at: null,
-            });
-            console.log(`[Auto-Downgrade] Completed for ${intfName}`);
-          } catch (error) {
-            console.error(
-              `[Auto-Downgrade] Error on ${intfName}:`,
-              error.message
-            );
-          }
+        scheduleDiaTemporaryRevert({
+          intfName,
+          switchName,
+          old_upmbps,
+          old_downmbps,
+          customer,
         });
       }
     }

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper LACP Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="lacp" title="Juniper LACP Troubleshooting" category="switching">
+    <commands>
+      <command>show lacp interfaces</command>
+      <command>show lacp statistics interfaces &lt;interface&gt;</command>
+      <command>show interfaces terse | match ae</command>
+      <command>show configuration interfaces ae&lt;number&gt;</command>
+      <command>show configuration interfaces &lt;member-interface&gt;</command>
+    </commands>
+
+    <check>
+      <item>LACP state</item>
+      <item>Actor/partner information</item>
+      <item>Member interfaces</item>
+      <item>Speed compatibility</item>
+      <item>VLAN configuration</item>
+      <item>Aggregated Ethernet configuration</item>
+    </check>
+
+    <commonCauses>
+      <item>Member not configured on both ends</item>
+      <item>LACP mode mismatch</item>
+      <item>Speed mismatch</item>
+      <item>Different VLAN/trunk settings</item>
+      <item>Wrong physical member</item>
+      <item>Remote aggregation issue</item>
+    </commonCauses>
+
+    <rule>Troubleshoot the aggregate and its members separately.</rule>
+  </topic>
+</knowledgeTopic>

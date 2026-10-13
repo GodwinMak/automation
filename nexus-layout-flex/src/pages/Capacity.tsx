@@ -14,6 +14,7 @@ import {
   Network,
   Globe,
   Share2,
+  Router,
   HardDrive,
   Users,
   TrendingUp,
@@ -29,6 +30,7 @@ interface CapacityStats {
   dia: { capacity: number; customers: number; up: number; down: number; upCapacity: number; downCapacity: number };
   ipt: { capacity: number; customers: number; up: number; down: number; upCapacity: number; downCapacity: number };
   shared: { capacity: number; customers: number; up: number; down: number; upCapacity: number; downCapacity: number };
+  l3vpn: { capacity: number; customers: number; up: number; down: number; upCapacity: number; downCapacity: number };
   total: { capacity: number; customers: number; switches: number; up: number; down: number; upCapacity: number; downCapacity: number };
 }
 
@@ -52,6 +54,12 @@ interface SwitchCapacity {
   shared_up_count: number;
   shared_down_capacity: number;
   shared_down_count: number;
+  l3vpn_capacity: number;
+  l3vpn_customers: number;
+  l3vpn_up_capacity: number;
+  l3vpn_up_count: number;
+  l3vpn_down_capacity: number;
+  l3vpn_down_count: number;
   total_capacity: number;
   total_customers: number;
   total_up_capacity: number;
@@ -199,6 +207,22 @@ const Capacity = () => {
         </div>
       ),
     },
+    {
+      key: "l3vpn_capacity",
+      label: "L3VPN",
+      render: (row: SwitchCapacity) => (
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1">
+            <Router className="h-3 w-3 text-cyan-500" />
+            <span className="font-medium">{formatCapacity(row.l3vpn_capacity)}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-success">↑{formatCapacity(row.l3vpn_up_capacity)} ({row.l3vpn_up_count})</span>
+            <span className="text-destructive">↓{formatCapacity(row.l3vpn_down_capacity)} ({row.l3vpn_down_count})</span>
+          </div>
+        </div>
+      ),
+    },
   ];
 
   const Action = (row: SwitchCapacity) => (
@@ -221,6 +245,12 @@ const Capacity = () => {
         <Share2 className="h-4 w-4 mr-2 text-orange-500" />
         View Shared Customers
       </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => navigate("/l3vpn-customer", { state: { nbr: row.nbr } })}
+      >
+        <Router className="h-4 w-4 mr-2 text-cyan-500" />
+        View L3VPN Customers
+      </DropdownMenuItem>
     </>
   );
 
@@ -238,7 +268,7 @@ const Capacity = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {/* Total Capacity */}
         <Card className="border-primary/20">
           <CardHeader className="pb-2">
@@ -408,6 +438,49 @@ const Capacity = () => {
             />
           </CardContent>
         </Card>
+
+        {/* L3VPN Capacity */}
+        <Card className="border-cyan-500/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Router className="h-4 w-4 text-cyan-500" />
+              L3VPN Capacity
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-cyan-500">
+              {stats ? formatCapacity(stats.l3vpn.capacity) : "..."}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="p-1.5 rounded bg-success/10">
+                <div className="flex items-center gap-1">
+                  <ArrowUpCircle className="h-3 w-3 text-success" />
+                  <span className="text-xs font-medium text-success">
+                    {stats ? formatCapacity(stats.l3vpn.upCapacity) : "..."}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">{stats?.l3vpn.up || 0} up</div>
+              </div>
+              <div className="p-1.5 rounded bg-destructive/10">
+                <div className="flex items-center gap-1">
+                  <ArrowDownCircle className="h-3 w-3 text-destructive" />
+                  <span className="text-xs font-medium text-destructive">
+                    {stats ? formatCapacity(stats.l3vpn.downCapacity) : "..."}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">{stats?.l3vpn.down || 0} down</div>
+              </div>
+            </div>
+            <Progress
+              value={
+                stats
+                  ? Number(getPercentage(stats.l3vpn.capacity, stats.total.capacity))
+                  : 0
+              }
+              className="mt-2 h-2"
+            />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Top Switches & Capacity Distribution */}
@@ -443,6 +516,8 @@ const Capacity = () => {
                               ? "bg-blue-500/10 text-blue-500"
                               : sw.type === "IPT"
                               ? "bg-purple-500/10 text-purple-500"
+                              : sw.type === "L3VPN"
+                              ? "bg-cyan-500/10 text-cyan-500"
                               : "bg-orange-500/10 text-orange-500"
                           }`}
                         >
@@ -579,6 +654,38 @@ const Capacity = () => {
                   <div className="flex items-center gap-3">
                     <span className="text-success">↑{stats ? formatCapacity(stats.shared.upCapacity) : "..."} ({stats?.shared.up || 0})</span>
                     <span className="text-destructive">↓{stats ? formatCapacity(stats.shared.downCapacity) : "..."} ({stats?.shared.down || 0})</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* L3VPN */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-cyan-500" />
+                    <span className="font-medium">L3VPN</span>
+                  </div>
+                  <span className="text-muted-foreground">
+                    {stats
+                      ? `${getPercentage(stats.l3vpn.capacity, stats.total.capacity)}%`
+                      : "..."}
+                  </span>
+                </div>
+                <div className="h-4 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-cyan-500 transition-all duration-500"
+                    style={{
+                      width: stats
+                        ? `${getPercentage(stats.l3vpn.capacity, stats.total.capacity)}%`
+                        : "0%",
+                    }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{stats ? formatCapacity(stats.l3vpn.capacity) : "..."}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-success">↑{stats ? formatCapacity(stats.l3vpn.upCapacity) : "..."} ({stats?.l3vpn.up || 0})</span>
+                    <span className="text-destructive">↓{stats ? formatCapacity(stats.l3vpn.downCapacity) : "..."} ({stats?.l3vpn.down || 0})</span>
                   </div>
                 </div>
               </div>

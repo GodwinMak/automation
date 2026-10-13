@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper MTU Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="mtu" title="Juniper MTU Troubleshooting" category="interface">
+    <symptom>Small packets work but larger packets fail, or a tunnel/routing protocol behaves unexpectedly.</symptom>
+
+    <commands>
+      <command>show interfaces &lt;interface&gt; terse</command>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+      <command>show configuration interfaces &lt;interface&gt;</command>
+      <command>ping &lt;destination&gt; size &lt;size&gt; do-not-fragment</command>
+    </commands>
+
+    <check>
+      <item>Physical MTU</item>
+      <item>Logical unit MTU</item>
+      <item>VLAN overhead</item>
+      <item>Tunnel overhead</item>
+      <item>MPLS overhead if used</item>
+      <item>Remote interface MTU</item>
+      <item>Protocol-specific packet requirements</item>
+    </check>
+
+    <diagnosis>MTU problems often appear as intermittent or application-specific failures rather than a completely down interface.</diagnosis>
+
+    <test>Use controlled DF/fragmentation tests and compare both ends.</test>
+  </topic>
+</knowledgeTopic>

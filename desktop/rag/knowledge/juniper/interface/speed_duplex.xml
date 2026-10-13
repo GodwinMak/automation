@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Speed and Duplex Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="speed-duplex" title="Juniper Speed and Duplex Troubleshooting" category="interface">
+    <commands>
+      <command>show interfaces &lt;interface&gt; statistics | match "bps|Speed"</command>
+      <command>show configuration | display set | match &lt;interface&gt;</command>
+      <command>show configuration interfaces &lt;interface&gt; | match "speed|duplex|auto-negotiation"</command>
+    </commands>
+
+    <check>
+      <item>Configured speed</item>
+      <item>Operational speed</item>
+      <item>Duplex</item>
+      <item>Auto-negotiation where applicable</item>
+      <item>Remote-end configuration</item>
+      <item>Interface capability</item>
+    </check>
+
+    <commonProblems>
+      <item>Speed mismatch</item>
+      <item>Unsupported speed</item>
+      <item>Incorrect optic</item>
+      <item>Breakout mismatch</item>
+      <item>Auto-negotiation mismatch on applicable interfaces</item>
+    </commonProblems>
+
+    <resolution>Ensure both ends support and agree on the intended operating mode. Do not force settings without confirming platform and optic support.</resolution>
+  </topic>
+</knowledgeTopic>

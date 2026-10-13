@@ -54,6 +54,23 @@ exports.getAllL3VPNCustomers = async (req, res) => {
   }
 };
 
+// Admin-only: flag/unflag an L3VPN customer as high profile
+exports.markHighProfile = async (req, res) => {
+  const { id } = req.params;
+  const { isHighProfile } = req.body;
+
+  try {
+    const info = await L3VPNCustomerInfo.findByPk(id);
+    if (!info) return res.status(404).json({ message: "L3VPN customer not found" });
+
+    await info.update({ isHighProfile: !!isHighProfile });
+    return res.status(200).json({ message: "Updated successfully", data: info });
+  } catch (error) {
+    console.error("Error updating high-profile flag for L3VPN customer:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 exports.getL3VPNCustomerById = async (req, res) => {
   const { id } = req.params;
 

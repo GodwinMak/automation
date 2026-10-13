@@ -197,11 +197,16 @@ const processCid = (cid) => {
 
 /**
  * Build commands for Metro Switch (WITH TAG)
- * 
+ *
  * Key differences from NO TAG:
  * - flexible-vlan-tagging instead of encapsulation ethernet-ccc
  * - encapsulation flexible-ethernet-services
  * - Unit has encapsulation vlan-ccc and vlan-id
+ *
+ * sharedPort: when the physical Metro interface is already configured for
+ * another customer (another VLAN unit already exists on it), the
+ * interface-level commands (flexible-vlan-tagging, speed, mtu, encapsulation,
+ * gigether-options, description) are skipped — only the new unit is added.
  */
 const buildMetroCommands = ({
   intf,
@@ -212,7 +217,8 @@ const buildMetroCommands = ({
   mbps,
   primaryPeName,
   primaryPeIp,
-  backupPeIp
+  backupPeIp,
+  sharedPort
 }) => {
   console.log(`\n[BUILD] ===== Building Metro Switch Commands (WITH TAG) =====`);
   console.log(`[BUILD] Interface: ${intf}`);
@@ -223,37 +229,47 @@ const buildMetroCommands = ({
   console.log(`[BUILD] Mbps: ${mbps}`);
   console.log(`[BUILD] Primary PE: ${primaryPeName} (${primaryPeIp})`);
   console.log(`[BUILD] Backup PE IP: ${backupPeIp}`);
-  
+  console.log(`[BUILD] Shared Port: ${!!sharedPort}`);
+
   // Process CID
   const { vcId, cidForDescription } = processCid(cid);
-  
+
   // Extract common PE/BNG identifier (e.g., LTZ-PE1, LTZ-BNG02)
   const nbrDescription = `${extractPeIdentifier(primaryPeName)} ps${psUnit}`;
   console.log(`[BUILD] NBR description: ${nbrDescription}`);
-  
-  const cmds = [
-    // Interface configuration
-    `set interfaces ${intf} description "<< ${customerName} >>"`,
-    `set interfaces ${intf} flexible-vlan-tagging`,
-    `set interfaces ${intf} speed auto`,
-    `set interfaces ${intf} mtu 9000`,
-    `set interfaces ${intf} encapsulation flexible-ethernet-services`,
-    `set interfaces ${intf} gigether-options auto-negotiation`,
-    
+
+  const cmds = [];
+
+  if (!sharedPort) {
+    // Interface configuration — only needed the first time this physical
+    // port is used, i.e. when it isn't already shared with another customer
+    cmds.push(
+      `set interfaces ${intf} description "<< ${customerName} >>"`,
+      `set interfaces ${intf} flexible-vlan-tagging`,
+      `set interfaces ${intf} speed auto`,
+      `set interfaces ${intf} mtu 9000`,
+      `set interfaces ${intf} encapsulation flexible-ethernet-services`,
+      `set interfaces ${intf} gigether-options auto-negotiation`
+    );
+  }
+
+  cmds.push(
     // Unit configuration with VLAN
     `set interfaces ${intf} unit ${psUnit} description "{cat=DIA|nbr=${nbrDescription}|Customer=${customerName}|cid=${cidForDescription}|Mbps=${mbps}}"`,
     `set interfaces ${intf} unit ${psUnit} encapsulation vlan-ccc`,
     `set interfaces ${intf} unit ${psUnit} vlan-id ${vlanId}`,
-    
+    `set interfaces ${intf} unit ${psUnit} statistics`,
+    `set interfaces ${intf} unit ${psUnit} family ccc`,
+
     // L2 circuit to PRIMARY PE/BNG
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} virtual-circuit-id ${vcId}`,
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} control-word`,
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} mtu 1800`,
     `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} pseudowire-status-tlv`,
-    
+
     // Backup neighbor
-    `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} backup-neighbor ${backupPeIp} virtual-circuit-id ${vcId}`,
-  ];
+    `set protocols l2circuit neighbor ${primaryPeIp} interface ${intf}.${psUnit} backup-neighbor ${backupPeIp} virtual-circuit-id ${vcId}`
+  );
   
   console.log(`[BUILD] Generated ${cmds.length} Metro Switch commands`);
   cmds.forEach((cmd, idx) => {
@@ -400,6 +416,7 @@ const pushDiaWithTagConfig = async (config) => {
     cid,
     mbps,
     wanIp,
+    sharedPort,
     includeInternalSubnet,
     internalSubnet,
     internalNextHop,
@@ -487,9 +504,10 @@ const pushDiaWithTagConfig = async (config) => {
       mbps,
       primaryPeName: primaryPe.name,
       primaryPeIp: primaryPe.host,
-      backupPeIp: backupPe.host
+      backupPeIp: backupPe.host,
+      sharedPort
     });
-    
+
     console.log(`[CONFIG] Pushing configuration to Metro Switch: ${metroSwitch.name}`);
     const metroResult = await runJunosCommands(
       metroSwitch.host,
@@ -600,14 +618,15 @@ const previewDiaWithTagConfig = (config) => {
     cid,
     mbps,
     wanIp,
+    sharedPort,
     includeInternalSubnet,
     internalSubnet,
     internalNextHop
   } = config;
-  
+
   const primaryPe = peDevices[0];
   const backupPe = peDevices[1];
-  
+
   // Build Metro commands
   const metroCommands = buildMetroCommands({
     intf: metroIntf,
@@ -618,7 +637,8 @@ const previewDiaWithTagConfig = (config) => {
     mbps,
     primaryPeName: primaryPe.name,
     primaryPeIp: primaryPe.host,
-    backupPeIp: backupPe.host
+    backupPeIp: backupPe.host,
+    sharedPort
   });
   
   // Build PE commands (same for both PEs)

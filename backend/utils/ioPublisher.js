@@ -14,9 +14,22 @@ let _client = null;
 let _connectPromise = null;
 let _lastRedisErrorAt = 0;
 const REDIS_ERROR_LOG_INTERVAL_MS = 30000;
+const PUBLISH_RETRY_DELAY_MS = 500;
+
+const resetClient = () => {
+  if (_client) {
+    try {
+      _client.disconnect();
+    } catch (_err) {
+      // Ignore disconnect errors during reset.
+    }
+  }
+  _client = null;
+  _connectPromise = null;
+};
 
 const getClient = () => {
-  if (_client) return _connectPromise;
+  if (_client && _connectPromise) return _connectPromise;
 
   const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
   _client = new Redis(redisUrl, { lazyConnect: true });
@@ -28,9 +41,17 @@ const getClient = () => {
     console.error("[ioPublisher] Redis error:", err.message);
   });
 
-  _connectPromise = _client.connect().then(() => {
-    console.log("[ioPublisher] Redis publisher connected:", redisUrl);
-  });
+  _connectPromise = _client
+    .connect()
+    .then(() => {
+      console.log("[ioPublisher] Redis publisher connected:", redisUrl);
+      return _client;
+    })
+    .catch((err) => {
+      // Important: clear cached failed promise/client so next publish can retry.
+      resetClient();
+      throw err;
+    });
 
   return _connectPromise;
 };
@@ -42,23 +63,33 @@ const getClient = () => {
  * @param {object} payload - JSON-serialisable event payload
  */
 const publish = async (event, payload) => {
-  try {
-    await getClient();
+  let lastError;
 
-    // The @socket.io/redis-adapter subscribes to "socket.io#<namespace>#" channel.
-    // Encoding: [uid, event, args] where uid is the nsp-unique ID.
-    // Easiest correct approach: encode as the adapter expects via msgpack-lite
-    // OR use the simpler "emit" channel that the adapter also supports.
-    //
-    // Because importing the adapter's internal encoder is fragile across versions,
-    // we use a clean approach: publish to a custom Redis channel and have the server
-    // subscribe to it (handled in server.js subscribeToWorkerEvents).
-    await _client.publish("socket.io:worker-events", JSON.stringify({ event, payload }));
-    return true;
-  } catch (err) {
-    console.error("[ioPublisher] Failed to publish event:", err.message);
-    return false;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await getClient();
+
+      // The @socket.io/redis-adapter subscribes to "socket.io#<namespace>#" channel.
+      // Encoding: [uid, event, args] where uid is the nsp-unique ID.
+      // Easiest correct approach: encode as the adapter expects via msgpack-lite
+      // OR use the simpler "emit" channel that the adapter also supports.
+      //
+      // Because importing the adapter's internal encoder is fragile across versions,
+      // we use a clean approach: publish to a custom Redis channel and have the server
+      // subscribe to it (handled in server.js subscribeToWorkerEvents).
+      await _client.publish("socket.io:worker-events", JSON.stringify({ event, payload }));
+      return true;
+    } catch (err) {
+      lastError = err;
+      resetClient();
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, PUBLISH_RETRY_DELAY_MS));
+      }
+    }
   }
+
+  console.error("[ioPublisher] Failed to publish event:", lastError?.message || "unknown error");
+  return false;
 };
 
 module.exports = { publish };

@@ -13,11 +13,13 @@ import {
 } from "@/components/ui/select";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useAuthContext } from "@/hooks/useAuthContext";
 
 const L3VPNCustomer = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { state: locationState } = location;
+  const { isAdmin } = useAuthContext();
 
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState("");
@@ -92,12 +94,32 @@ const L3VPNCustomer = () => {
     setPage(1);
   };
 
+  const handleToggleHighProfile = async (customer: any, checked: boolean) => {
+    setCustomers((prev: any) =>
+      prev.map((c: any) => (c.id === customer.id ? { ...c, isHighProfile: checked } : c))
+    );
+    try {
+      const token = localStorage.getItem("userToken");
+      await axios.patch(
+        `${PRODUCTION_URL}/l3vpncustomers/${customer.id}/high-profile`,
+        { isHighProfile: checked },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error("Failed to update high profile flag:", error);
+      setCustomers((prev: any) =>
+        prev.map((c: any) => (c.id === customer.id ? { ...c, isHighProfile: !checked } : c))
+      );
+    }
+  };
+
   const columns = [
     { key: "customerName", label: "Customer Name" },
     { key: "interface", label: "Interface" },
     { key: "nbr", label: "Neighbor" },
     { key: "port", label: "Port" },
     { key: "cid", label: "Circuit ID" },
+    { key: "downmbps", label: "Capacity(Mbps)" },
     {
       key: "operationalStatus",
       label: "Status",
@@ -113,6 +135,22 @@ const L3VPNCustomer = () => {
       label: "Destination",
       render: (customer: any) => customer?.l3vpncustomer?.destination ?? "-",
     },
+    ...(isAdmin()
+      ? [
+          {
+            key: "isHighProfile",
+            label: "High Profile",
+            render: (customer: any) => (
+              <input
+                type="checkbox"
+                checked={!!customer?.isHighProfile}
+                onChange={(e) => handleToggleHighProfile(customer, e.target.checked)}
+                className="h-4 w-4 cursor-pointer"
+              />
+            ),
+          },
+        ]
+      : []),
   ];
 
   const Action = (customer: any) => (

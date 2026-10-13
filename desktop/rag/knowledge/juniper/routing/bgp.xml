@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper BGP & BNG Integration Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="bgp-bng-troubleshooting" title="Juniper BGP and BNG Routing Dependencies" category="routing">
+    <scope>Focuses on BGP peering over IS-IS loopbacks and BNG subscriber route injection across the network topology.</scope>
+
+    <dependencies>
+      <dependency step="1">Physical / Logical (e.g., ps*, ge-, ae) link up</dependency>
+      <dependency step="2">IS-IS L1/L2 loopback reachability established</dependency>
+      <dependency step="3">iBGP / eBGP TCP port 179 session established</dependency>
+      <dependency step="4">BGP route reflection and MP-BGP VPNv4/VPNv6/L2VPN route exchange</dependency>
+    </dependencies>
+
+    <bngBgpTroubleshooting>
+      <item title="BGP Peer Down over Loopback">
+        <check>Run `show route &lt;bgp-peer-loopback&gt;`. If missing, troubleshoot IS-IS L1/L2 route leaking or metric constraints before touching BGP configuration.</check>
+      </item>
+      <item title="Subscriber Prefix / Pseudowire Unreachable">
+        <check>Verify if the BNG is advertising the subscriber subnet or pseudowire (`ps*`) route into BGP or IS-IS.</check>
+        <command>show route advertising-protocol bgp &lt;core-peer-ip&gt; &lt;subscriber-prefix&gt;</command>
+        <command>show route receive-protocol bgp &lt;bng-loopback&gt; &lt;subscriber-prefix&gt;</command>
+        <note>If the pseudowire route is present in BGP/IS-IS but the subscriber still can't pass traffic, the route being advertised doesn't guarantee Layer 2 resolution — verify ARP/subscriber binding on the PE/BNG itself: see routing/arp.xml's bngSubscriberResolution section for `show arp no-resolve interface ps&lt;N&gt;.&lt;unit&gt;` against the PE/BNG candidate devices (197.155.94.100, 197.155.94.138, 41.175.38.42, 41.175.38.43).</note>
+      </item>
+    </bngBgpTroubleshooting>
+
+    <essentialCommands>
+      <command>show bgp summary</command>
+      <command>show bgp neighbor &lt;peer-ip&gt;</command>
+      <command>show route protocol bgp</command>
+      <command>show route forwarding-table destination &lt;prefix&gt;</command>
+    </essentialCommands>
+  </topic>
+</knowledgeTopic>

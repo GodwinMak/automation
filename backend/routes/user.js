@@ -11,6 +11,7 @@ const {
   getUserById,
   getRoles,
   registerPushToken,
+  updateNotificationPreferences,
 } = require("../Controller/user");
 const { verifyToken, adminOnly } = require("../middleware/auth");
 
@@ -30,6 +31,9 @@ router.get("/profile", verifyToken, getProfile);
 
 // Update own profile (password, fullName)
 router.put("/profile", verifyToken, updateProfile);
+
+// Update own SMS/in-app notification preferences (phone number, toggles, ISIS watch scope)
+router.put("/notification-preferences", verifyToken, updateNotificationPreferences);
 
 // ============ ADMIN ONLY ROUTES ============
 // Get all users

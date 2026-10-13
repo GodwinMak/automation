@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="LIT Terminal icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1F12" />
+      <stop offset="100%" stop-color="#163327" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#79FF59" />
+      <stop offset="100%" stop-color="#34E507" />
+    </linearGradient>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="96" fill="url(#bg)" />
+  <rect x="76" y="104" width="360" height="304" rx="28" fill="#0E0E0E" stroke="#3C4B36" stroke-width="10" />
+
+  <rect x="96" y="128" width="320" height="28" rx="12" fill="#202020" />
+  <circle cx="116" cy="142" r="7" fill="#79FF59" />
+  <circle cx="138" cy="142" r="7" fill="#4EA8DE" />
+  <circle cx="160" cy="142" r="7" fill="#FFD166" />
+
+  <path d="M142 238 L214 282 L142 326" fill="none" stroke="url(#accent)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="244" y1="326" x2="362" y2="326" stroke="url(#accent)" stroke-width="22" stroke-linecap="round" />
+
+  <text x="256" y="410" font-family="JetBrains Mono, monospace" font-size="36" text-anchor="middle" fill="#79FF59" font-weight="700">LIT</text>
+</svg>

@@ -1,4 +1,4 @@
-const {createDevice, createDevicesBulk, getAllDevices, getDeviceById, updateDevice, deleteDevice, getInterfacesUp,getCustomersByIp } = require("../Controller/devices")
+const {createDevice, createDevicesBulk, getAllDevices, getDeviceById, getDeviceByIp, updateDevice, deleteDevice, getInterfacesUp,getCustomersByIp } = require("../Controller/devices")
 
 const router = require("express").Router();
 
@@ -12,6 +12,9 @@ router.post("/bulk", createDevicesBulk);
 
 // Get all devices
 router.get("/", getAllDevices);
+
+// Get a single device by IP (must be registered before /:id)
+router.get("/by-ip/:ip", getDeviceByIp);
 
 // Get a single device by ID
 router.get("/:id", getDeviceById);

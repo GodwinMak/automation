@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper VLAN Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="vlan-troubleshooting" title="Juniper VLAN Troubleshooting" category="switching">
+    <commands>
+      <command>show configuration | display set | match vlan</command>
+      <command>show configuration | display set | &lt;interface&gt;.&lt;unit&gt;</command>
+    </commands>
+    <check>
+      <item>VLAN exists</item>
+      <item>VLAN membership</item>
+      <item>Access vs trunk mode</item>
+      <item>Tagged/untagged behavior</item>
+      <item>VLAN ID</item>
+      <item>Native VLAN where applicable</item>
+      <item>IRB association</item>
+    </check>
+
+    <commonCauses>
+      <item>VLAN not configured</item>
+      <item>Wrong VLAN ID</item>
+      <item>Port not in VLAN</item>
+      <item>Incorrect tagging</item>
+      <item>VLAN filtering</item>
+      <item>Wrong logical unit/encapsulation</item>
+    </commonCauses>
+
+    <workflow>Verify the VLAN definition, interface membership, MAC learning, and remote-side configuration.</workflow>
+  </topic>
+</knowledgeTopic>

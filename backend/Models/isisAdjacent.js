@@ -23,6 +23,10 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: false,
       },
+      point_to_point_ip: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
       metric: {
         type: DataTypes.INTEGER,
         allowNull: true,
@@ -63,6 +67,55 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
       },
       last_high_traffic_alert: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      // --- Optics power monitoring fields ---
+      // Stored as JSON-stringified arrays of dBm readings so that both
+      // single-lane ports (ge/xe) and 4-lane ports (et- 40G/100G) fit the
+      // same column, e.g. "[-0.07]" vs "[-0.32,-0.96,-0.99,-1.85]".
+      // Radio-backed links have no optics, so these stay null for them.
+      tx_power_dbm: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      rx_power_dbm: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      tx_high_alarm_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      tx_low_alarm_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      tx_high_warning_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      tx_low_warning_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      rx_high_alarm_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      rx_low_alarm_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      rx_high_warning_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      rx_low_warning_dbm: {
+        type: DataTypes.FLOAT,
+        allowNull: true,
+      },
+      last_power_checked: {
         type: DataTypes.DATE,
         allowNull: true,
       },

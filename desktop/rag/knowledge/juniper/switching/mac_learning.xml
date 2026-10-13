@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper MAC Learning Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="mac-learning" title="Juniper MAC Learning Troubleshooting" category="switching">
+    <deviceToUse>only apply to psinterface example ps334.334 only on this devices 197.155.94.100, 197.155.94.138, 41.175.38.42, 41.175.38.43</deviceToUse>
+    <commands>
+      <command>show arp no-resolve interface &lt;interface&gt;.&lt;unit&gt;</command>
+      <command>show configuration | display set | match vlan-id</command>
+    </commands>
+    <check>
+      <item>Expected MAC present</item>
+      <item>MAC learned on expected interface</item>
+      <item>MAC moves between interfaces</item>
+      <item>MAC age</item>
+      <item>VLAN association</item>
+    </check>
+
+    <macFlapping>
+      <description>Frequent movement can indicate:</description>
+      <cause>Layer-2 loop</cause>
+      <cause>Redundant path problem</cause>
+      <cause>Incorrect aggregation</cause>
+      <cause>Bridging design issue</cause>
+      <cause>Duplicate device behavior</cause>
+      <note>Investigate the physical and logical topology before disabling ports.</note>
+    </macFlapping>
+  </topic>
+</knowledgeTopic>

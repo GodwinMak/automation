@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper FPC/PIC Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="fpc-pic" title="Juniper FPC/PIC Troubleshooting" category="hardware">
+    <commands>
+      <command>show chassis hardware</command>
+      <command>show chassis fpc</command>
+      <command>show chassis fpc detail</command>
+      <command>show chassis alarms</command>
+    </commands>
+
+    <check>
+      <item>FPC state</item>
+      <item>PIC state</item>
+      <item>Slot alarms</item>
+      <item>Temperature</item>
+      <item>Power</item>
+      <item>Online/offline state</item>
+      <item>Repeated resets</item>
+    </check>
+
+    <symptoms>
+      <item>Multiple interfaces down on same PIC</item>
+      <item>Interface instability across a slot</item>
+      <item>Hardware alarms</item>
+      <item>FPC offline</item>
+      <item>Unexpected resets</item>
+    </symptoms>
+
+    <note>If several ports fail simultaneously on one hardware component, investigate the FPC/PIC before replacing individual optics.</note>
+  </topic>
+</knowledgeTopic>

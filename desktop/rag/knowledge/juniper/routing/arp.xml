@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper ARP and Neighbor Discovery Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="arp-nd-troubleshooting" title="Juniper ARP, IPv6 ND, and Layer 2 Resolution Troubleshooting" category="routing">
+
+    <scope>
+      Covers Layer 2 next-hop MAC resolution across physical interfaces (ge-, xe-, ae), IRB/VLAN interfaces on Access/Aggregation nodes, and subscriber pseudowires (ps*) on L2 BNGs.
+    </scope>
+
+    <ipv4Commands>
+      <command>show arp</command>
+      <command>show arp no-resolve interface &lt;interface-name&gt;</command>
+      <command>show route &lt;destination-ip&gt;</command>
+      <command>ping &lt;gateway-ip&gt;</command>
+    </ipv4Commands>
+
+    <ipv6Commands>
+      <command>show ipv6 neighbors</command>
+      <command>show ipv6 neighbors interface &lt;interface-name&gt;</command>
+      <command>show route table inet6.0 &lt;destination-ip&gt;</command>
+      <command>ping &lt;destination-ip&gt;</command>
+    </ipv6Commands>
+
+    <diagnosticChecklist>
+      <item>IP address and CIDR subnet mask configuration match on both ends of the segment.</item>
+      <item>Interface operational state is UP/UP (`show interfaces terse`).</item>
+      <item>ARP/ND entry status: Valid state vs. Incomplete/Hold state.</item>
+      <item>VLAN tagging, IRB binding, or Q-in-Q configuration on Access and Aggregation switches.</item>
+      <item>Duplicate IP address conflicts reported in syslog.</item>
+      <item>MAC address learning across intermediate L2 access switches (`show ethernet-switching table`).</item>
+      <item>Firewall filters (`family inet filter`) blocking ARP/ICMP traffic on the interface.</item>
+    </diagnosticChecklist>
+
+    <bngSubscriberResolution>
+      <description>
+        On L2 BNGs, dynamic subscriber sessions terminate on logical units or pseudowires (ps*). If the subscriber route is active in the RIB but traffic fails:
+      </description>
+      <step order="1">Verify subscriber access pseudowire state: `show interfaces ps&lt;N&gt;.&lt;unit&gt;`.</step>
+      <step order="2">Verify ARP / subscriber binding entry, filtered to just this interface/unit: `show arp no-resolve interface ps&lt;N&gt;.&lt;unit&gt;` — no-resolve skips a reverse-DNS lookup per entry, which matters on a BNG with many subscribers. A broader `show arp | match ps` also works but returns every subscriber on the device, not just this one, and `show dhcp server binding` / `show pppoe subscriber` are the session-layer alternatives if the ARP entry itself is missing entirely.</step>
+      <step order="3">Confirm the BNG has bound the subscriber IP to the correct underlying logical unit/MAC.</step>
+
+      <psInterfaceLocation>
+        A ps* interface lives on the PE/BNG layer, not the Metro access switch — `show arp no-resolve interface ps&lt;N&gt;.&lt;unit&gt;` must be run against whichever of these devices actually hosts the interface, not guessed: 197.155.94.100, 197.155.94.138, 41.175.38.42, 41.175.38.43. If the exact device isn't already known, try each candidate in turn until one reports the interface — the same candidate-device approach documented in show_interface_unit_syntax.xml for this same device set.
+      </psInterfaceLocation>
+      <psInterfaceNaming>
+        A ps* interface's number and its logical unit number are always the same value — e.g. ps4411.4411, never ps4411.&lt;a-different-number&gt;. So given only a unit number (no interface name), the full interface reference can be constructed directly as ps&lt;unit&gt;.&lt;unit&gt; without a separate lookup step.
+      </psInterfaceNaming>
+    </bngSubscriberResolution>
+
+    <ruleOfThumb>
+      If the IP route exists in the routing table but neighbor resolution shows "Incomplete" or missing MAC entries, isolate Layer 2 VLAN tagging, physical link errors, subscriber session state, or firewall filtering rather than troubleshooting IS-IS/BGP routing protocols.
+    </ruleOfThumb>
+
+  </topic>
+</knowledgeTopic>

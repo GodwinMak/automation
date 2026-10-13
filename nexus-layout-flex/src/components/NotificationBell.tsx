@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { Bell, Check, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { PRODUCTION_URL } from "@/utils/Api";
 import { useNavigate } from "react-router-dom";
+import io from "socket.io-client";
 
 interface Notification {
   id: string;
   customerId: string;
   customerName: string;
-  customerType: "DIA" | "IPT" | "Shared";
+  customerType: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH" | "ISIS";
   interface: string;
   cid: string;
   nbr: string;
@@ -34,7 +35,52 @@ export const NotificationBell = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const openRef = useRef(open);
+  openRef.current = open;
   const navigate = useNavigate();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingSoundRetryRef = useRef(false);
+  const hasFetchedUnreadOnceRef = useRef(false);
+  const lastUnreadCountRef = useRef(0);
+
+  const playNotificationSound = () => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio("/notification.mp3");
+      audioRef.current.preload = "auto";
+    }
+    audioRef.current.muted = false;
+    audioRef.current.volume = 1;
+    audioRef.current.currentTime = 0;
+    audioRef.current.play().catch((error) => {
+      console.error("Failed to play notification sound:", error);
+      pendingSoundRetryRef.current = true;
+    });
+  };
+
+  // Preload once and retry blocked playback right after the next user interaction.
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio("/notification.mp3");
+      audioRef.current.preload = "auto";
+    }
+
+    const retrySound = () => {
+      if (!pendingSoundRetryRef.current || !audioRef.current) return;
+      pendingSoundRetryRef.current = false;
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {
+        pendingSoundRetryRef.current = true;
+      });
+    };
+
+    document.addEventListener("pointerdown", retrySound);
+    document.addEventListener("keydown", retrySound);
+
+    return () => {
+      document.removeEventListener("pointerdown", retrySound);
+      document.removeEventListener("keydown", retrySound);
+    };
+  }, []);
 
   // Delete all notifications for the user
   const deleteAllNotifications = async () => {
@@ -51,11 +97,46 @@ export const NotificationBell = () => {
     }
   };
 
-  // Fetch unread count periodically
+  // Fetch unread count periodically (fallback if the socket push is missed)
   useEffect(() => {
     fetchUnreadCount();
     const interval = setInterval(fetchUnreadCount, 30000); // Every 30 seconds
     return () => clearInterval(interval);
+  }, []);
+
+  // Real-time push: register with the backend and react to link-down alerts
+  // immediately instead of waiting on the next 30s poll.
+  useEffect(() => {
+    const userData = localStorage.getItem("userData");
+    const user = userData ? JSON.parse(userData) : null;
+
+    const socket = io(`${PRODUCTION_URL}`, {
+      transports: ["websocket"],
+      upgrade: false,
+    });
+
+    if (user?.id) {
+      socket.emit("register", user.id);
+    }
+
+    socket.on("linkDownAlert", (payload) => {
+      // Temporary diagnostic — remove once the "no sound for customer-down"
+      // report is resolved. Confirms in the browser console whether the
+      // event actually reaches this tab at all, and with what payload,
+      // rather than only inferring it from whether sound played.
+      console.log("[NotificationBell] linkDownAlert received:", payload);
+      setUnreadCount((prev) => {
+        const next = prev + 1;
+        lastUnreadCountRef.current = next;
+        return next;
+      });
+      if (openRef.current) fetchNotifications();
+      playNotificationSound();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // Fetch notifications when popover opens
@@ -73,7 +154,19 @@ export const NotificationBell = () => {
       const res = await axios.get(`${PRODUCTION_URL}/notifications/unread-count`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setUnreadCount(res.data.unreadCount);
+      const newCount = res.data.unreadCount;
+      // Sound already played in real time if the socket push landed; this
+      // catches the case where it didn't (e.g. the Redis relay from a cron
+      // worker process failed) so an unread-count increase is never silent.
+      // Uses a ref (not the unreadCount state) because this function is
+      // captured once by setInterval and would otherwise always compare
+      // against the initial render's stale value.
+      if (hasFetchedUnreadOnceRef.current && newCount > lastUnreadCountRef.current) {
+        playNotificationSound();
+      }
+      hasFetchedUnreadOnceRef.current = true;
+      lastUnreadCountRef.current = newCount;
+      setUnreadCount(newCount);
     } catch (error) {
       console.error("Error fetching unread count:", error);
     }
@@ -162,14 +255,20 @@ export const NotificationBell = () => {
     if (!notification.isRead) {
       markAsRead(notification.id);
     }
-    
+
+    // ISIS adjacency alerts have no single-customer detail page to deep-link
+    // to — just mark as read and leave the popover open.
+    if (notification.customerType === "ISIS") {
+      return;
+    }
+
     // Navigate to customer view based on type
     const viewPath = notification.customerType === "DIA"
       ? "/viewcustomer"
       : notification.customerType === "IPT"
       ? "/view-ipt-customer"
       : "/view-shared-customer";
-    
+
     navigate(viewPath, {
       state: {
         customer: {
@@ -182,7 +281,7 @@ export const NotificationBell = () => {
         },
       },
     });
-    
+
     setOpen(false);
   };
 

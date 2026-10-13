@@ -7,6 +7,7 @@ const {
   getSharedCustomerInfoMap,
 } = require("../utils/statusTracker");
 const { enqueueBatch } = require("../utils/warehouseSpool");
+const { withLock } = require("../utils/cronLock");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -385,24 +386,13 @@ module.exports = (io, options = {}) => {
   };
 
   const runAll = async () => {
-    const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('shared_cron_update', 0) AS acquired",
-    );
-    if (!acquired) {
-      if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn(
-          "[Shared] Another instance is already running — skipping this tick.",
-        );
+    await withLock("shared_cron_update", async () => {
+      try {
+        await updateShared(); // ✅ Run first
+      } catch (err) {
+        console.error("[Main Runner] Fatal error:", err.message);
       }
-      return;
-    }
-    try {
-      await updateShared(); // ✅ Run first
-    } catch (err) {
-      console.error("[Main Runner] Fatal error:", err.message);
-    } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('shared_cron_update')");
-    }
+    });
   };
   if (options.schedule !== false) {
     cron.schedule("2,7,12,17,22,27,32,37,42,47,52,57 * * * *", runAll);

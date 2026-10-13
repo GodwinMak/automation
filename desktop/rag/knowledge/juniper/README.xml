@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Troubleshooting Knowledge Base — overview
+-->
+<knowledgeTopic>
+  <topic id="juniper-kb-overview" title="Juniper Troubleshooting Knowledge Base" category="overview">
+    <description>This corpus is designed for RAG retrieval and covers Juniper interface, switching, routing, hardware, and circuit troubleshooting.</description>
+
+    <routingProtocol>The routing section uses IS-IS, not OSPF.</routingProtocol>
+
+    <structure>
+      <path>juniper/</path>
+      <path>juniper/interface/</path>
+      <path>juniper/switching/</path>
+      <path>juniper/routing/</path>
+      <path>juniper/routing/arp.md</path>
+      <path>juniper/routing/routing.md</path>
+      <path>juniper/routing/bgp.md</path>
+      <path>juniper/routing/isis.md</path>
+      <path>juniper/hardware/</path>
+      <path>juniper/circuits/</path>
+    </structure>
+
+    <ragGuidance>
+      <recommendedMetadata>
+        <field name="vendor">Juniper</field>
+        <field name="os">Junos</field>
+        <field name="domain">network_troubleshooting</field>
+        <field name="protocol">IS-IS</field>
+        <field name="source_type">knowledge_base</field>
+      </recommendedMetadata>
+      <note>Each document is intentionally focused on a single troubleshooting topic so it can be chunked and retrieved independently.</note>
+    </ragGuidance>
+  </topic>
+</knowledgeTopic>

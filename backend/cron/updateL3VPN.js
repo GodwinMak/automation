@@ -7,6 +7,7 @@ const {
   getL3vpnCustomerInfoMap,
 } = require("../utils/statusTracker");
 const { enqueueBatch } = require("../utils/warehouseSpool");
+const { withLock } = require("../utils/cronLock");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -705,24 +706,13 @@ module.exports = (io, options = {}) => {
     }
   };
   const runAll = async () => {
-    const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('l3vpn_cron_update', 0) AS acquired",
-    );
-    if (!acquired) {
-      if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn(
-          "[L3VPN] Another instance is already running — skipping this tick.",
-        );
+    await withLock("l3vpn_cron_update", async () => {
+      try {
+        await updateL3VPN();
+      } catch (error) {
+        console.error("[L3VPN Updater] ❌ Error in runAll:", error.message);
       }
-      return;
-    }
-    try {
-      await updateL3VPN();
-    } catch (error) {
-      console.error("[L3VPN Updater] ❌ Error in runAll:", error.message);
-    } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('l3vpn_cron_update')");
-    }
+    });
   };
 
   if (options.schedule !== false) {

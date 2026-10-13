@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Interface Errors Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="interface-errors" title="Juniper Interface Errors Troubleshooting" category="interface">
+    <importantCounters>
+      <commands>
+        <command>show interfaces &lt;interface&gt; extensive</command>
+        <command>show interfaces &lt;interface&gt; statistics</command>
+      </commands>
+      <review>
+        <item>Input errors</item>
+        <item>Output errors</item>
+        <item>CRC/FCS</item>
+        <item>Drops</item>
+        <item>Framing errors</item>
+        <item>Carrier transitions</item>
+        <item>Queue drops</item>
+        <item>Policing drops</item>
+      </review>
+    </importantCounters>
+
+    <interpretation>Physical errors point toward cable, optic, signal, speed, duplex, or FEC issues. Output drops may indicate congestion, queue limits, shaping, or downstream problems.</interpretation>
+
+    <method>
+      <step order="1">Record current counters.</step>
+      <step order="2">Check whether counters are increasing.</step>
+      <step order="3">Compare with the remote device.</step>
+      <step order="4">Inspect optics and physical media.</step>
+      <step order="5">Check interface configuration.</step>
+      <step order="6">Test after one controlled change.</step>
+    </method>
+
+    <warning>A non-zero counter alone does not prove a current fault. Determine whether the counter is actively increasing.</warning>
+  </topic>
+</knowledgeTopic>

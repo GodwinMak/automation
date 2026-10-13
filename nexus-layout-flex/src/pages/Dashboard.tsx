@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/card";
 import { PRODUCTION_URL } from "@/utils/Api";
 import axios from "axios";
-import { Server, Users, Activity, ArrowUpCircle, ArrowDownCircle, Clock, Network, Globe, Share2, Layers, Wifi, WifiOff } from "lucide-react";
+import { Server, Users, Activity, ArrowUpCircle, ArrowDownCircle, Clock, Network, Globe, Share2, Layers, Wifi, WifiOff, Waypoints, AlertTriangle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import MLInsights from "@/components/MLInsights";
 
@@ -30,6 +30,12 @@ export default function Dashboard() {
     activeDownFTTHCount: number;
     temporaryUpgradesCount: number;
     permanentUpgradesCount: number;
+    freeFTTHCount: number;
+    nonFreeFTTHCount: number;
+    highProfileCustomerCount: number;
+    upL2VPNCircuitCount: number;
+    mixedL2VPNCircuitCount: number;
+    downL2VPNCircuitCount: number;
   };
 
   const [data, setData] = useState<StatsData>({
@@ -50,6 +56,12 @@ export default function Dashboard() {
     activeDownFTTHCount: 0,
     temporaryUpgradesCount: 0,
     permanentUpgradesCount: 0,
+    freeFTTHCount: 0,
+    nonFreeFTTHCount: 0,
+    highProfileCustomerCount: 0,
+    upL2VPNCircuitCount: 0,
+    mixedL2VPNCircuitCount: 0,
+    downL2VPNCircuitCount: 0,
   });
 
   const navigate = useNavigate();
@@ -173,11 +185,21 @@ export default function Dashboard() {
       title: "Temporary Upgrades",
       value: data.temporaryUpgradesCount ?? 0,
       icon: Clock,
-      type: "temporary",
-      route: "/dia-customer",
+      type: "all",
+      route: "/temporary-upgrades",
       color: "text-warning",
       bgColor: "bg-warning/10",
       borderColor: "border-warning/20",
+    },
+    {
+      title: "High Profile Customers",
+      value: data.highProfileCustomerCount ?? 0,
+      icon: Users,
+      type: "all",
+      route: "/high-profile-customers",
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+      borderColor: "border-primary/20",
     },
   ];
 
@@ -226,6 +248,10 @@ export default function Dashboard() {
   const sharedUptimeRate = totalSharedCustomers > 0 ? (((data.upSharedCustomerCount ?? 0) / totalSharedCustomers) * 100).toFixed(1) : 0;
   const l3vpnUptimeRate = totalL3VPNCustomers > 0 ? (((data.upL3VPNCustomerCount ?? 0) / totalL3VPNCustomers) * 100).toFixed(1) : 0;
   const ftthUptimeRate = totalFTTHCustomers > 0 ? (((data.upFTTHCustomerCount ?? 0) / totalFTTHCustomers) * 100).toFixed(1) : 0;
+  const totalL2VPNCircuits =
+    (data.upL2VPNCircuitCount ?? 0) + (data.mixedL2VPNCircuitCount ?? 0) + (data.downL2VPNCircuitCount ?? 0);
+  const l2vpnUptimeRate =
+    totalL2VPNCircuits > 0 ? (((data.upL2VPNCircuitCount ?? 0) / totalL2VPNCircuits) * 100).toFixed(1) : 0;
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -243,7 +269,7 @@ export default function Dashboard() {
       </div>
 
       {/* General Stats */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-3">
         {generalStats.map((stat, index) => (
           <StatCard key={stat.title} stat={stat} index={index} />
         ))}
@@ -462,7 +488,7 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <div
                 onClick={() => navigate("/ftth-customer", { state: { filterType: "up" } })}
                 className="p-4 rounded-xl border border-success/20 bg-success/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
@@ -522,8 +548,36 @@ export default function Dashboard() {
                 </p>
               </div>
 
+              {/* Free Customers */}
+              <div
+                onClick={() => navigate("/ftth-customer", { state: { freeFilter: "free" } })}
+                className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Users className="h-5 w-5 text-blue-500" />
+                  <span className="text-2xl font-bold text-blue-500">
+                    {(data.freeFTTHCount ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Free Customers</p>
+              </div>
+
+              {/* Non-Free Customers */}
+              <div
+                onClick={() => navigate("/ftth-customer", { state: { freeFilter: "nonfree" } })}
+                className="p-4 rounded-xl border border-purple-500/20 bg-purple-500/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Users className="h-5 w-5 text-purple-500" />
+                  <span className="text-2xl font-bold text-purple-500">
+                    {(data.nonFreeFTTHCount ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Non-Free Customers</p>
+              </div>
+
               {/* Progress bar — spans full width */}
-              <div className="p-4 rounded-xl border border-border bg-muted/50 md:col-span-4">
+              <div className="p-4 rounded-xl border border-border bg-muted/50 md:col-span-3 lg:col-span-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Total: {totalFTTHCustomers}</span>
@@ -546,6 +600,83 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {/* L2VPN Circuit Stats */}
+      <div className="grid gap-6 lg:grid-cols-1">
+        <Card className="border border-border">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <div className="p-2 rounded-lg bg-indigo-500/10">
+                <Waypoints className="h-5 w-5 text-indigo-500" />
+              </div>
+              L2VPN Circuits
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div
+                onClick={() => navigate("/l2vpn-circuits", { state: { filterType: "up" } })}
+                className="p-4 rounded-xl border border-success/20 bg-success/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <ArrowUpCircle className="h-5 w-5 text-success" />
+                  <span className="text-2xl font-bold text-success">
+                    {(data.upL2VPNCircuitCount ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Circuits UP</p>
+              </div>
+              <div
+                onClick={() => navigate("/l2vpn-circuits", { state: { filterType: "mixed" } })}
+                className="p-4 rounded-xl border border-warning/20 bg-warning/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <AlertTriangle className="h-5 w-5 text-warning" />
+                  <span className="text-2xl font-bold text-warning">
+                    {(data.mixedL2VPNCircuitCount ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Circuits MIXED</p>
+                <p className="text-xs text-warning/80 mt-1">One or more hops down</p>
+              </div>
+              <div
+                onClick={() => navigate("/l2vpn-circuits", { state: { filterType: "down" } })}
+                className="p-4 rounded-xl border border-destructive/20 bg-destructive/10 cursor-pointer hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <ArrowDownCircle className="h-5 w-5 text-destructive" />
+                  <span className="text-2xl font-bold text-destructive">
+                    {(data.downL2VPNCircuitCount ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Circuits DOWN</p>
+              </div>
+            </div>
+
+            {/* L2VPN Progress Bar */}
+            <div className="space-y-2 pt-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total: {totalL2VPNCircuits}</span>
+                <span className="text-success font-medium">Fully Up: {l2vpnUptimeRate}%</span>
+              </div>
+              <div className="h-3 rounded-full bg-muted overflow-hidden flex">
+                <div
+                  className="h-full bg-success transition-all duration-500"
+                  style={{ width: `${(totalL2VPNCircuits > 0 ? ((data.upL2VPNCircuitCount ?? 0) / totalL2VPNCircuits) * 100 : 0)}%` }}
+                />
+                <div
+                  className="h-full bg-warning transition-all duration-500"
+                  style={{ width: `${(totalL2VPNCircuits > 0 ? ((data.mixedL2VPNCircuitCount ?? 0) / totalL2VPNCircuits) * 100 : 0)}%` }}
+                />
+                <div
+                  className="h-full bg-destructive transition-all duration-500"
+                  style={{ width: `${(totalL2VPNCircuits > 0 ? ((data.downL2VPNCircuitCount ?? 0) / totalL2VPNCircuits) * 100 : 0)}%` }}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Network Overview */}
       <Card className="border border-border">
         <CardHeader>
@@ -555,7 +686,7 @@ export default function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-8">
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border">
               <div>
                 <p className="text-sm text-muted-foreground">Total DIA</p>
@@ -590,6 +721,13 @@ export default function Dashboard() {
                 <p className="text-2xl font-bold text-teal-500">{totalFTTHCustomers}</p>
               </div>
               <Wifi className="h-8 w-8 text-teal-500/50" />
+            </div>
+            <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border">
+              <div>
+                <p className="text-sm text-muted-foreground">Total L2VPN Circuits</p>
+                <p className="text-2xl font-bold text-indigo-500">{totalL2VPNCircuits}</p>
+              </div>
+              <Waypoints className="h-8 w-8 text-indigo-500/50" />
             </div>
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border">
               <div>

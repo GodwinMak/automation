@@ -41,6 +41,7 @@ const ROLE_PERMISSIONS = {
     canViewChurnAnalysis: true,
     canView95thReport: true,
     canDiagnoseCustomer: true,
+    canManageNetworkMaps: true,
   },
   operator: {
     // Operator has same as Admin but no user management
@@ -52,6 +53,7 @@ const ROLE_PERMISSIONS = {
     canViewChurnAnalysis: true,
     canView95thReport: false,
     canDiagnoseCustomer: true,
+    canManageNetworkMaps: false,
   },
   customer_relation: {
     // Customer Relation has limited access
@@ -65,6 +67,7 @@ const ROLE_PERMISSIONS = {
     canViewChurnAnalysis: true,
     canView95thReport: false,
     canDiagnoseCustomer: true,
+    canManageNetworkMaps: false,
   },
 };
 
@@ -117,6 +120,7 @@ const verifyToken = async (req, res, next) => {
       fullName: user.fullName,
       role: user.role,
       permissions: ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS.customer_relation,
+      canViewProcessMonitoring: user.canViewProcessMonitoring,
     };
 
     next();
@@ -174,6 +178,28 @@ const requirePermission = (permission) => {
 };
 
 /**
+ * Check a standalone per-user boolean flag on req.user (e.g.
+ * canViewProcessMonitoring) rather than a role-derived permission — for
+ * access that's granted to a specific person regardless of their role,
+ * where requirePermission's role-wide ROLE_PERMISSIONS lookup doesn't fit.
+ */
+const requireFlag = (flagName) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    if (!req.user[flagName]) {
+      return res.status(403).json({
+        message: `Access denied. You don't have '${flagName}' permission.`,
+      });
+    }
+
+    next();
+  };
+};
+
+/**
  * Admin only middleware
  */
 const adminOnly = requireRole("admin");
@@ -194,6 +220,7 @@ module.exports = {
   verifyToken,
   requireRole,
   requirePermission,
+  requireFlag,
   adminOnly,
   adminOrOperator,
   getPermissionsForRole,

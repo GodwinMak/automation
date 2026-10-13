@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper FEC Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="fec" title="Juniper FEC Troubleshooting" category="interface">
+    <symptom>High-speed interface is down, unstable, or has errors despite apparently correct optics.</symptom>
+    <commands>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      <command>show interfaces &lt;interface&gt; | match FEC</command>
+      <command>show interfaces &lt;interface&gt; | match speed</command>
+    </commands>
+
+    <check>
+      <item>FEC Corrected Errors</item>
+      <item>FEC Uncorrected Errors</item>
+      <item>FEC Corrected Errors Rate</item>
+      <item>FEC Uncorrected Errors Rate</item>
+    </check>
+
+    <commonCauses>
+      <item>FEC mismatch</item>
+      <item>Unsupported FEC mode</item>
+      <item>Incorrect optic</item>
+      <item>Remote-side configuration mismatch</item>
+    </commonCauses>
+
+    <workflow>Verify the intended FEC mode on both ends before changing it. Record the existing configuration and operational state.</workflow>
+  </topic>
+</knowledgeTopic>

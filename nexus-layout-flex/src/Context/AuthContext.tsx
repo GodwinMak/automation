@@ -17,12 +17,20 @@ export type Permissions = {
   canViewUptimeTrends: boolean;
   canViewChurnAnalysis: boolean;
   canView95thReport: boolean;
+  canManageNetworkMaps: boolean;
 };
 
 // Note: Watchlist is always personal - each user sees only their own watchlist
 
 // User types
 export type UserRole = "admin" | "operator" | "customer_relation";
+
+// Flags granted to a specific person regardless of role (unlike
+// Permissions above, which is entirely role-derived and shared by
+// everyone with that role) — mirrors the backend's requireFlag()
+// middleware (middleware/auth.js), used where access needs to be
+// grantable to one individual without affecting their whole role.
+export type UserFlag = "canViewProcessMonitoring";
 
 export type User = {
   id: string;
@@ -31,6 +39,11 @@ export type User = {
   fullName: string;
   role: UserRole;
   permissions: Permissions;
+  canViewProcessMonitoring: boolean;
+  phoneNumber?: string | null;
+  canReceiveIsisSms: boolean;
+  highTrafficSmsEnabled: boolean;
+  isisWatchScope: "all" | "watchlist";
 };
 
 type AuthState = {
@@ -54,6 +67,7 @@ type AuthContextType = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   hasPermission: (permission: keyof Permissions) => boolean;
+  hasFlag: (flag: UserFlag) => boolean;
   isAdmin: () => boolean;
   isOperator: () => boolean;
   isCustomerRelation: () => boolean;
@@ -169,6 +183,10 @@ const AuthProvider = ({ children }: { children: ReactNode }) => {
     return state.userData.permissions[permission] === true;
   };
 
+  const hasFlag = (flag: UserFlag): boolean => {
+    return state.userData?.[flag] === true;
+  };
+
   const isAdmin = (): boolean => {
     return state.userData?.role === "admin";
   };
@@ -189,6 +207,7 @@ const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         logout,
         hasPermission,
+        hasFlag,
         isAdmin,
         isOperator,
         isCustomerRelation,

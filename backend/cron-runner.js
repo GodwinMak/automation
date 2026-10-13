@@ -93,6 +93,14 @@ async function initWorker() {
     await db.sequelize.authenticate();
     console.log(`💾 [Worker: ${task}] Database connection securely established.`);
 
+    // Seed the in-memory status-tracking cache from persisted history before
+    // this worker starts polling, so a restart doesn't blind trackStatusChanges
+    // into treating every interface as "first seen" (see utils/statusTracker.js).
+    if (["DIA", "IPT", "Shared", "L3VPN", "FTTH"].includes(task)) {
+      const { initializeCache } = require(path.join(__dirname, "utils/statusTracker"));
+      await initializeCache();
+    }
+
     // Pass null for 'io' layer to prevent clustering conflicts or crashes
     switch (task) {
       case "DIA":
@@ -115,10 +123,42 @@ async function initWorker() {
         require(path.join(__dirname, "cron/updateFTTH.js"))(null);
         console.log("⏰ FTTH infrastructure sync engine started.");
         break;
-    //   case "ISIS":
-    //     require("./cron/isisAdjacent")(null);
-    //     console.log("⏰ IS-IS Adjacency tracking engine started on its own process.");
-    //     break;
+      case "Switch":
+        require(path.join(__dirname, "cron/switchConfiguration.js"))(null);
+        console.log("⏰ Switch configuration backup engine started on 2-hour interval cycles.");
+        break;
+      case "PTP":
+        require(path.join(__dirname, "cron/ptpBackfill"))(null);
+        console.log("⏰ ISIS point-to-point backfill engine started on retry interval cycles.");
+        break;
+      case "SmsDlr":
+        require(path.join(__dirname, "cron/smsDeliveryReportChecker"))(null);
+        console.log("⏰ SMS delivery report checker started on 5-minute interval cycles.");
+        break;
+      case "SmsSend":
+        require(path.join(__dirname, "cron/smsSender"))(null);
+        console.log("⏰ SMS sender started on 15-second poll cycles.");
+        break;
+      case "ISIS":
+        require(path.join(__dirname, "cron/isisAdjacent"))(null);
+        console.log("⏰ IS-IS Adjacency tracking engine started on its own process.");
+        break;
+      case "L2VPN":
+        require(path.join(__dirname, "cron/updateL2VPN"))(null, { job: "interfaces" });
+        console.log("⏰ L2VPN interface discovery engine started on 5-minute interval cycles.");
+        break;
+      case "L2VPNCircuits":
+        require(path.join(__dirname, "cron/updateL2VPN"))(null, { job: "circuits" });
+        console.log("⏰ L2VPN circuit config detail engine started on hourly interval cycles.");
+        break;
+      case "ISISMetric":
+        require(path.join(__dirname, "cron/isisInterfaceMetric"))(null);
+        console.log("⏰ IS-IS interface metric engine started on its own process.");
+        break;
+      case "ISISStats":
+        require(path.join(__dirname, "cron/isisInterfaceStats"))(null);
+        console.log("⏰ IS-IS interface traffic-stats engine started on its own process.");
+        break;
       default:
         console.error(`❌ Unknown background worker task identifier: ${task}`);
         process.exit(1);

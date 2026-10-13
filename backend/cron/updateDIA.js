@@ -8,6 +8,7 @@ const {
   getDiaCustomerInfoMap,
 } = require("../utils/statusTracker");
 const { enqueueBatch } = require("../utils/warehouseSpool");
+const { withLock } = require("../utils/cronLock");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -41,27 +42,62 @@ module.exports = (io, options = {}) => {
     { name: "LTZ-AGG1-TIG", host: "41.175.37.6" },
   ];
 
+  // Missing-NBR resolution (updateAggDevices) retried the same BNG/AGG SSH
+  // lookups every 5-minute cycle even for NBRs that have never once
+  // resolved (e.g. the access node isn't configured on the AGG layer the
+  // way this script expects) — wasting up to 2 BNG x 2 AGG SSH round-trips
+  // per interface, per cycle, forever. Back off a failed NBR instead of
+  // hammering it every tick; a human needs to fix the underlying
+  // provisioning, not a faster retry.
+  const AGG_RETRY_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+  const aggResolutionCooldown = new Map(); // nbr -> next-retry timestamp
+
   // === HELPER FUNCTIONS ===
+  // readyTimeout/keepalive above only catch a dead handshake or a dead
+  // socket. Once conn.exec() opens a channel, nothing bounds how long we
+  // wait for its "close" event — a device that accepts the exec but never
+  // closes the channel (busy CPU, paginated output, a stuck CLI process)
+  // leaves the promise (and the connection) hanging forever, since the
+  // transport itself is still alive and answering keepalives. This is
+  // exactly the kind of leaked session that can exhaust a router's limited
+  // concurrent SSH session pool and lock out real admins. This watchdog
+  // forces conn.end() if the command doesn't finish in time.
+  const EXEC_COMMAND_TIMEOUT_MS = 30000;
+
   // Run command over SSH
   const runCommand = (host, cmd) => {
     return new Promise((resolve, reject) => {
       const conn = new Client();
       let result = "";
+      let isDone = false;
+
+      const timeoutTimer = setTimeout(() => {
+        finish(reject, new Error(`Timed out waiting for command output from ${host} (${EXEC_COMMAND_TIMEOUT_MS / 1000}s): ${cmd}`));
+        conn.end();
+      }, EXEC_COMMAND_TIMEOUT_MS);
+
+      const finish = (fn, arg) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(timeoutTimer);
+        fn(arg);
+      };
+
       conn
         .on("ready", () => {
           conn.exec(cmd, (err, stream) => {
-            if (err) return reject(err);
+            if (err) return finish(reject, err);
             stream
               .on("data", (data) => {
                 result += data.toString();
               })
               .on("close", () => {
                 conn.end();
-                resolve(result.trim());
+                finish(resolve, result.trim());
               });
           });
         })
-        .on("error", (err) => reject(err))
+        .on("error", (err) => finish(reject, err))
         .connect({ host, ...sshConfig });
     });
   };
@@ -821,17 +857,33 @@ module.exports = (io, options = {}) => {
         return;
       }
 
-      console.log(`[AGG Updater] Found ${missingNbrs.length} missing NBRs.`);
+      const now = Date.now();
+      const dueNbrs = missingNbrs.filter(({ nbr }) => {
+        const nextAttempt = aggResolutionCooldown.get(nbr);
+        return !nextAttempt || nextAttempt <= now;
+      });
+      const skippedCount = missingNbrs.length - dueNbrs.length;
 
-      for (const { nbr } of missingNbrs) {
+      console.log(
+        `[AGG Updater] Found ${missingNbrs.length} missing NBRs` +
+          (skippedCount
+            ? ` (${skippedCount} skipped — still in retry cooldown after previous failed attempts)`
+            : "") +
+          `.`,
+      );
+
+      for (const { nbr } of dueNbrs) {
         const interfaces = await customerinfo.findAll({
           attributes: ["id", "interface"],
           where: { nbr },
           raw: true,
         });
 
+        let resolvedThisNbr = false;
+
         for (const { id, interface: intf } of interfaces) {
           if (!intf) continue;
+          if (resolvedThisNbr) break;
 
           const base = intf.split(".")[0];
           const shortIntf = `${base}.0`;
@@ -839,6 +891,7 @@ module.exports = (io, options = {}) => {
           console.log(
             `[AGG Updater] Trying BNG interfaces for ${nbr}, interface: ${shortIntf}`,
           );
+          bngLoop:
           for (const bng of switches) {
             try {
               // Run on BNG
@@ -849,7 +902,12 @@ module.exports = (io, options = {}) => {
               const neighRegex = /Neighbor:\s+(\d{1,3}(?:\.\d{1,3}){3})/i;
               const neighMatch = neighOut.match(neighRegex);
 
-              if (!neighMatch) continue;
+              if (!neighMatch) {
+                console.log(
+                  `[AGG Updater] No l2circuit neighbor found on ${bng.name} for ${shortIntf}`,
+                );
+                continue;
+              }
 
               const ip = neighMatch[1];
               console.log(
@@ -926,9 +984,16 @@ module.exports = (io, options = {}) => {
                     );
                   }
 
-                  // Found and processed, break out of AGG loop
-                  break;
+                  resolvedThisNbr = true;
+                  // Found and processed — break out of both the AGG loop and
+                  // the BNG loop, no need to redundantly repeat the same
+                  // lookup against the other BNG now that it's resolved.
+                  break bngLoop;
                 }
+
+                console.log(
+                  `[AGG Updater] No description match for neighbor ${ip} on ${sw.name}`,
+                );
               }
             } catch (error) {
               console.error(
@@ -938,6 +1003,15 @@ module.exports = (io, options = {}) => {
             }
           }
         }
+
+        if (!resolvedThisNbr) {
+          aggResolutionCooldown.set(nbr, now + AGG_RETRY_COOLDOWN_MS);
+          console.log(
+            `[AGG Updater] Could not resolve NBR ${nbr} — will retry in ${AGG_RETRY_COOLDOWN_MS / 3600000}h`,
+          );
+        } else {
+          aggResolutionCooldown.delete(nbr);
+        }
       }
     } catch (error) {
       console.error("[AGG Updater] Fatal error:", error.message);
@@ -945,25 +1019,14 @@ module.exports = (io, options = {}) => {
   };
 
   const runAll = async () => {
-    const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('dia_cron_update', 0) AS acquired",
-    );
-    if (!acquired) {
-      if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn(
-          "[DIA] Another instance is already running — skipping this tick.",
-        );
+    await withLock("dia_cron_update", async () => {
+      try {
+        await updateDIA(); // ✅ Run first
+        await updateAggDevices(); // ✅ Run second
+      } catch (err) {
+        console.error("[Main Runner] Fatal error:", err.message);
       }
-      return;
-    }
-    try {
-      await updateDIA(); // ✅ Run first
-      await updateAggDevices(); // ✅ Run second
-    } catch (err) {
-      console.error("[Main Runner] Fatal error:", err.message);
-    } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('dia_cron_update')");
-    }
+    });
   };
   if (options.schedule !== false) {
     cron.schedule("0,5,10,15,20,25,30,35,40,45,50,55 * * * *", runAll);

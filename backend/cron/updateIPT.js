@@ -7,6 +7,7 @@ const {
   getIptCustomerInfoMap,
 } = require("../utils/statusTracker");
 const { enqueueBatch } = require("../utils/warehouseSpool");
+const { withLock } = require("../utils/cronLock");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -28,7 +29,10 @@ module.exports = (io, options = {}) => {
     { name: "LTZ-PE1-TIG", host: "197.155.94.138" },
   ];
 
-  const p = [{ name: "LTZ-P1-DAR", host: "197.155.94.114" }];
+  const p = [
+    { name: "LTZ-P1-DAR", host: "197.155.94.114" },
+    {name: "LTZ-P1-WNG", host:"197.155.94.55"}
+  ];
 
   const agg = [
     { name: "LTZ-AGG1-RAH", host: "41.175.37.5" },
@@ -973,25 +977,14 @@ module.exports = (io, options = {}) => {
   };
 
   const runAll = async () => {
-    const [[{ acquired }]] = await db.sequelize.query(
-      "SELECT GET_LOCK('ipt_cron_update', 0) AS acquired",
-    );
-    if (!acquired) {
-      if (process.env.LOG_LOCK_SKIPS === "1") {
-        console.warn(
-          "[IPT] Another instance is already running — skipping this tick.",
-        );
+    await withLock("ipt_cron_update", async () => {
+      try {
+        await updateIPT(); // ✅ Run first
+        await updateAggDevicesIPT(); // ✅ Run second
+      } catch (err) {
+        console.error("[Main Runner] Fatal error:", err.message);
       }
-      return;
-    }
-    try {
-      await updateIPT(); // ✅ Run first
-      await updateAggDevicesIPT(); // ✅ Run second
-    } catch (err) {
-      console.error("[Main Runner] Fatal error:", err.message);
-    } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('ipt_cron_update')");
-    }
+    });
   };
   if (options.schedule !== false) {
     cron.schedule("1,6,11,16,21,26,31,36,41,46,51,56 * * * *", runAll);

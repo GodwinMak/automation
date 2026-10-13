@@ -4,6 +4,9 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getPermissionsForRole, invalidateUserCache } = require("../middleware/auth");
 
+// Beem SMS format: country code without '+', e.g. 255712345678
+const PHONE_RE = /^255\d{9}$/;
+
 /**
  * Register a new user (public - creates first admin or self-registration)
  */
@@ -104,6 +107,7 @@ exports.login = async (req, res) => {
         fullName: user.fullName,
         role: user.role,
         permissions: getPermissionsForRole(user.role),
+        canViewProcessMonitoring: user.canViewProcessMonitoring,
       },
       token,
     });
@@ -193,6 +197,66 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
+/**
+ * Update own SMS/in-app notification preferences (phone number, ISIS &
+ * high-traffic SMS toggles, ISIS watch-scope mode). Kept separate from
+ * updateProfile since that function has unrelated password-change side
+ * effects and a narrow response shape that doesn't include these fields.
+ * This is also where a user sets their own phone number — previously only
+ * admins could set it via updateById, but a user can't use this feature
+ * without being able to add their own number.
+ */
+exports.updateNotificationPreferences = async (req, res) => {
+  try {
+    const { phoneNumber, canReceiveIsisSms, highTrafficSmsEnabled, isisWatchScope } = req.body;
+    const user = await Users.findByPk(req.user.id);
+
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+
+    if (phoneNumber !== undefined) {
+      if (phoneNumber && !PHONE_RE.test(phoneNumber)) {
+        return res.status(400).send({ message: "Phone number must start with 255 and be 12 digits (e.g. 255712345678)" });
+      }
+      user.phoneNumber = phoneNumber || null;
+    }
+
+    if (canReceiveIsisSms !== undefined) {
+      user.canReceiveIsisSms = !!canReceiveIsisSms;
+    }
+
+    if (highTrafficSmsEnabled !== undefined) {
+      user.highTrafficSmsEnabled = !!highTrafficSmsEnabled;
+    }
+
+    if (isisWatchScope !== undefined) {
+      if (!["all", "watchlist"].includes(isisWatchScope)) {
+        return res.status(400).send({ message: "Invalid isisWatchScope" });
+      }
+      user.isisWatchScope = isisWatchScope;
+    }
+
+    await user.save();
+
+    invalidateUserCache(user.id);
+
+    res.status(200).send({
+      message: "Notification preferences updated",
+      user: {
+        id: user.id,
+        phoneNumber: user.phoneNumber,
+        canReceiveIsisSms: user.canReceiveIsisSms,
+        highTrafficSmsEnabled: user.highTrafficSmsEnabled,
+        isisWatchScope: user.isisWatchScope,
+      },
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send({ message: err.message });
+  }
+};
+
 // ============ ADMIN ONLY FUNCTIONS ============
 
 /**
@@ -247,7 +311,7 @@ exports.getAllUsers = async (req, res) => {
  */
 exports.createUser = async (req, res) => {
   try {
-    const { email, password, fullName, role } = req.body;
+    const { email, password, fullName, role, phoneNumber, canReceiveIsisSms, canViewProcessMonitoring } = req.body;
 
     if (!email || !password) {
       return res.status(400).send({ message: "Email and password are required" });
@@ -257,6 +321,10 @@ exports.createUser = async (req, res) => {
     const validRoles = ["admin", "operator", "customer_relation"];
     if (role && !validRoles.includes(role)) {
       return res.status(400).send({ message: "Invalid role" });
+    }
+
+    if (phoneNumber && !PHONE_RE.test(phoneNumber)) {
+      return res.status(400).send({ message: "Phone number must start with 255 and be 12 digits (e.g. 255712345678)" });
     }
 
     const userCheck = await Users.findOne({ where: { email: email } });
@@ -276,6 +344,9 @@ exports.createUser = async (req, res) => {
       password: hashedPassword,
       fullName: fullName || username,
       role: role || "operator",
+      phoneNumber: phoneNumber || null,
+      canReceiveIsisSms: !!canReceiveIsisSms,
+      canViewProcessMonitoring: !!canViewProcessMonitoring,
       createdBy: req.user.id,
     });
 
@@ -288,6 +359,9 @@ exports.createUser = async (req, res) => {
         fullName: newUser.fullName,
         role: newUser.role,
         isActive: newUser.isActive,
+        phoneNumber: newUser.phoneNumber,
+        canReceiveIsisSms: newUser.canReceiveIsisSms,
+        canViewProcessMonitoring: newUser.canViewProcessMonitoring,
         createdAt: newUser.createdAt,
       },
     });
@@ -303,12 +377,16 @@ exports.createUser = async (req, res) => {
 exports.updateById = async (req, res) => {
   try {
     const userId = req.params.id;
-    const { email, password, fullName, role, isActive } = req.body;
+    const { email, password, fullName, role, isActive, phoneNumber, canReceiveIsisSms, canViewProcessMonitoring } = req.body;
 
     const user = await Users.findByPk(userId);
 
     if (!user) {
       return res.status(404).send({ message: "User not found" });
+    }
+
+    if (phoneNumber !== undefined && phoneNumber !== null && phoneNumber !== "" && !PHONE_RE.test(phoneNumber)) {
+      return res.status(400).send({ message: "Phone number must start with 255 and be 12 digits (e.g. 255712345678)" });
     }
 
     // Prevent admin from deactivating themselves
@@ -354,13 +432,25 @@ exports.updateById = async (req, res) => {
       user.isActive = isActive;
     }
 
+    if (phoneNumber !== undefined) {
+      user.phoneNumber = phoneNumber || null;
+    }
+
+    if (canReceiveIsisSms !== undefined) {
+      user.canReceiveIsisSms = !!canReceiveIsisSms;
+    }
+
+    if (canViewProcessMonitoring !== undefined) {
+      user.canViewProcessMonitoring = !!canViewProcessMonitoring;
+    }
+
     await user.save();
 
     // Bust cache — role, isActive, or password may have changed
     invalidateUserCache(user.id);
 
-    res.status(200).send({ 
-      message: "User updated successfully", 
+    res.status(200).send({
+      message: "User updated successfully",
       user: {
         id: user.id,
         username: user.username,
@@ -368,6 +458,9 @@ exports.updateById = async (req, res) => {
         fullName: user.fullName,
         role: user.role,
         isActive: user.isActive,
+        phoneNumber: user.phoneNumber,
+        canReceiveIsisSms: user.canReceiveIsisSms,
+        canViewProcessMonitoring: user.canViewProcessMonitoring,
         updatedAt: user.updatedAt,
       }
     });

@@ -21,6 +21,17 @@ module.exports = (sequelize, DataTypes) =>{
       long:{
         type: DataTypes.DECIMAL(10, 6),
         allowNull: true
+      },
+      // Set by fiberCutDetector.checkDeviceIsolation() when every ISIS
+      // adjacency touching this device (its own + neighbor-reported) is
+      // Down — i.e. it has no working path to the rest of the network.
+      isIsolated: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      isolatedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
       }
     })
 }

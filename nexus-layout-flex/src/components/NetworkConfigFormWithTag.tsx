@@ -38,6 +38,7 @@ interface FormData {
   cid: string;
   mbps: string;
   wanIp: string;
+  sharedPort: boolean;
   includeInternalSubnet: boolean;
   internalSubnet: string;
   internalNextHop: string;
@@ -77,6 +78,7 @@ export const NetworkConfigFormWithTag = ({
     cid: "",
     mbps: "",
     wanIp: "",
+    sharedPort: false,
     includeInternalSubnet: false,
     internalSubnet: "",
     internalNextHop: "",
@@ -258,6 +260,18 @@ export const NetworkConfigFormWithTag = ({
             onChange={(e) => updateField("metroIntf", e.target.value)}
           />
         </FormField>
+        <div className="flex items-center gap-2 pt-2">
+          <Checkbox
+            id="shared-port"
+            checked={formData.sharedPort}
+            onCheckedChange={(checked) =>
+              updateField("sharedPort", checked as boolean)
+            }
+          />
+          <label htmlFor="shared-port" className="text-sm text-muted-foreground cursor-pointer">
+            Port is already shared with another customer (skip physical interface commands, add unit only)
+          </label>
+        </div>
       </FormSection>
 
       {/* PE/BNG Devices Section */}

@@ -5,6 +5,7 @@ const { Op, literal } = require("sequelize");
 const { parse } = require("path");
 const { trackStatusChanges } = require("../utils/statusTracker");
 const { enqueueBatch } = require("../utils/warehouseSpool");
+const { withLock } = require("../utils/cronLock");
 
 require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 
@@ -90,19 +91,7 @@ module.exports = (io, options = {}) => {
     const ftthcustomer = db.ftthcustomers;
 
     try {
-      // Distributed lock across all PM2 instances via MySQL advisory lock.
-      // GET_LOCK('name', 0) returns 1 if acquired, 0 if another connection holds it.
-      const [[{ acquired }]] = await db.sequelize.query(
-        "SELECT GET_LOCK('ftth_cron_update', 0) AS acquired"
-      );
-      if (!acquired) {
-        if (process.env.LOG_LOCK_SKIPS === "1") {
-          console.warn("[FTTH] Another instance is already running — skipping this tick.");
-        }
-        isRunning = false;
-        return;
-      }
-
+      await withLock("ftth_cron_update", async () => {
     const runStart = new Date();
     try {
       const bngResults = await Promise.all(
@@ -146,25 +135,6 @@ module.exports = (io, options = {}) => {
       }
 
       const activeIps = allRecords.map((r) => r.ip);
-
-      // 1. Fetch only transitioning customers before executing updates to avoid massive full-table loads
-      const transitioningToUp = await ftthcustomer.findAll({
-        where: {
-          ip: activeIps,
-          status: "down",
-        },
-        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber"],
-        raw: true,
-      });
-
-      const transitioningToDown = await ftthcustomer.findAll({
-        where: {
-          ip: { [Op.notIn]: activeIps },
-          status: "up",
-        },
-        attributes: ["ip", "pppoeusername", "customerID", "customerName", "homeNumber"],
-        raw: true,
-      });
 
       // 2. Perform database updates
       // Upsert seen records as "up"
@@ -234,21 +204,31 @@ module.exports = (io, options = {}) => {
       });
       enqueueBatch("FTTH", mergedRecords);
 
-      // 3. Track status changes using only the transitioned subset (highly memory efficient)
-      const changedFtthCustomers = [
-        ...transitioningToUp.map(r => ({ ...r, status: "up" })),
-        ...transitioningToDown.map(r => ({ ...r, status: "down" }))
-      ];
+      // 3. Track status changes using the full current snapshot, not just this
+      // tick's delta — trackStatusChanges' cache is unseeded per-process, so
+      // feeding it only transitions let a customer's first-ever down event
+      // after a worker restart go unlogged (cache read back as "unknown").
+      // Passing every customer every tick, as updateIPT.js/updateDIA.js do,
+      // makes the cache self-heal within a single cycle.
+      //
+      // pppoeusername (not ip) is the stable identity for FTTH tracking —
+      // a subscriber's IP can change between sessions, but their PPPoE
+      // login is fixed. Customers without one can't be reliably tracked.
+      const trackableFtthCustomers = ftthRecords.filter((r) => r.pppoeusername);
+      const skippedCount = ftthRecords.length - trackableFtthCustomers.length;
+      if (skippedCount > 0) {
+        console.warn(`[FTTH] Skipping status tracking for ${skippedCount} customer(s) with no pppoeusername`);
+      }
 
-      if (changedFtthCustomers.length > 0) {
+      if (trackableFtthCustomers.length > 0) {
         const ftthInfoMap = Object.fromEntries(
-          changedFtthCustomers.map((r) => [
-            r.ip,
+          trackableFtthCustomers.map((r) => [
+            r.pppoeusername,
             { customerName: r.customerName || r.pppoeusername, cid: r.customerID || null, nbr: r.homeNumber || null },
           ])
         );
         await trackStatusChanges(
-          changedFtthCustomers.map((r) => ({ interface: r.ip, operationalStatus: r.status, switchName: null })),
+          trackableFtthCustomers.map((r) => ({ interface: r.pppoeusername, operationalStatus: r.status, switchName: null })),
           "FTTH",
           ftthInfoMap
         );
@@ -256,9 +236,8 @@ module.exports = (io, options = {}) => {
 
       } catch (error) {
         console.error("[FTTH] Error updating FTTH data:", error);
-      } finally {
-        await db.sequelize.query("SELECT RELEASE_LOCK('ftth_cron_update')");
       }
+      });
     } catch (outerError) {
       console.error("[FTTH] Outer Error:", outerError.message);
     } finally {

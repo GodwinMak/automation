@@ -1,5 +1,6 @@
 const db = require("../Models");
 const { Op, fn, col, literal, QueryTypes } = require("sequelize");
+const { computeAllL2VPNCircuits } = require("./l2vpnCircuit.js");
 
 const StatusChangeHistory = db.statusChangeHistories;
 const StatusChangeHistoryFtth = db.statusChangeHistoriesFtth;
@@ -264,14 +265,44 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       }
     };
 
+    // L2VPN circuits have no single live-status table to query like the
+    // types above — "current status" instead means recomputing the full
+    // clustered circuit view (computeAllL2VPNCircuits, shared with the
+    // L2VPN Circuits page and the dashboard counts). Unlike every other
+    // type here, BOTH "down" (every hop down) and "mixed" (one leg broken)
+    // count as churn-worthy — a degraded circuit is still a real customer
+    // impact, not just a fully-dead one.
+    const getActualDownOrMixedL2VPNCircuits = async () => {
+      if (customerType && customerType !== "L2VPN") return;
+
+      const circuits = await computeAllL2VPNCircuits();
+      for (const c of circuits) {
+        if (c.overallOperationalStatus !== "down" && c.overallOperationalStatus !== "mixed") continue;
+        const interfaceId = c.hops[0]?.virtualCircuitId;
+        if (!interfaceId) continue;
+        const key = `L2VPN:${interfaceId}`;
+        actualDownInterfaces.set(key, {
+          interface: interfaceId,
+          switchName: c.hops[0]?.switchName || null,
+          operationalStatus: c.overallOperationalStatus,
+          customerType: "L2VPN",
+          customerName: c.customerName,
+          nbr: c.hops[0]?.neighbor || null,
+        });
+      }
+    };
+
     await Promise.all([
       getActualDownFromTable(db.diacustomers, "DIA"),
       getActualDownFromTable(db.iptcustomers, "IPT"),
       getActualDownFromTable(db.sharedcustomers, "SHARED"),
       getActualDownFromTable(db.l3vpncustomers, "L3VPN"),
+      getActualDownOrMixedL2VPNCircuits(),
     ]);
 
-    // FTTH uses 'status' instead of 'operationalStatus' and 'ip' as identifier
+    // FTTH uses 'status' instead of 'operationalStatus' and pppoeusername as
+    // identifier (an IP can change between sessions; the PPPoE login can't).
+    // ip is kept as a separate field — still needed for display/diagnostics.
     if (!excludeFtthFlag && (!customerType || customerType === "FTTH")) {
       const ftthDownRaw = await db.ftthcustomers.findAll({
         where: { status: "down" },
@@ -279,9 +310,11 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
         raw: true,
       });
       for (const c of ftthDownRaw) {
-        const key = `FTTH:${c.ip}`;
+        if (!c.pppoeusername) continue; // can't be identified/tracked without one
+        const key = `FTTH:${c.pppoeusername}`;
         actualDownInterfaces.set(key, {
-          interface: c.ip,
+          interface: c.pppoeusername,
+          ip: c.ip,
           switchName: null,
           customerType: "FTTH",
           pppoeusername: c.pppoeusername,
@@ -300,31 +333,81 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     //
     // Use a GROUP BY subquery to fetch ONLY the latest row per (interface, customerType)
     // instead of loading every row into memory.
-    const historyTable = customerType === "FTTH"
-      ? "statusChangeHistories_ftth"
-      : "statusChangeHistories";
-    const typeFilter = customerType
-      ? "WHERE customerType = :customerType"
-      : excludeFtthFlag
-        ? "WHERE customerType != 'FTTH'"
-        : "";
-    const latestRows = await db.sequelize.query(
-      `SELECT s.*
-       FROM ${historyTable} s
-       INNER JOIN (
-         SELECT interface, customerType, MAX(changedAt) AS maxChangedAt
-         FROM ${historyTable}
-         ${typeFilter}
-         GROUP BY interface, customerType
-       ) latest
-         ON  s.interface    = latest.interface
-         AND s.customerType = latest.customerType
-         AND s.changedAt    = latest.maxChangedAt`,
-      {
-        replacements: customerType ? { customerType } : {},
+    //
+    // FTTH history lives in a SEPARATE table (statusChangeHistories_ftth)
+    // from every other customer type (statusChangeHistories) — see
+    // trackStatusChanges in utils/statusTracker.js, which always routes FTTH
+    // to the _ftth table. When no customerType filter is given (the default,
+    // combined view used by the Churn Analysis page), BOTH tables must be
+    // queried and merged; querying only one — as this used to do — silently
+    // drops FTTH's real tracked history, so every down FTTH customer fell
+    // through to the untracked/"unknown" bucket in STEP 3 below.
+    const downInterfacesByType = {
+      DIA: [],
+      IPT: [],
+      SHARED: [],
+      L3VPN: [],
+      FTTH: [],
+      L2VPN: [],
+    };
+
+    for (const [key] of actualDownInterfaces.entries()) {
+      const [type, interfaceName] = key.split(":");
+      if (!downInterfacesByType[type]) continue;
+      downInterfacesByType[type].push(interfaceName);
+    }
+
+    const fetchLatestRowsForType = async (tableName, type, interfaces) => {
+      if (!interfaces.length) return [];
+
+      // Query only currently-down interfaces to avoid scanning full history.
+      const query = `
+        SELECT s.*
+        FROM ${tableName} s
+        INNER JOIN (
+          SELECT interface, customerType, MAX(changedAt) AS maxChangedAt
+          FROM ${tableName}
+          WHERE customerType = :customerType
+            AND interface IN (:interfaces)
+          GROUP BY interface, customerType
+        ) latest
+          ON  s.interface = latest.interface
+          AND s.customerType = latest.customerType
+          AND s.changedAt = latest.maxChangedAt
+      `;
+
+      return db.sequelize.query(query, {
+        replacements: { customerType: type, interfaces },
         type: QueryTypes.SELECT,
-      }
-    );
+      });
+    };
+
+    const latestRows = [];
+    const latestRowPromises = [];
+
+    if (!customerType || customerType === "DIA") {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories", "DIA", downInterfacesByType.DIA));
+    }
+    if (!customerType || customerType === "IPT") {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories", "IPT", downInterfacesByType.IPT));
+    }
+    if (!customerType || customerType === "SHARED") {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories", "SHARED", downInterfacesByType.SHARED));
+    }
+    if (!customerType || customerType === "L3VPN") {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories", "L3VPN", downInterfacesByType.L3VPN));
+    }
+    if (!excludeFtthFlag && (!customerType || customerType === "FTTH")) {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories_ftth", "FTTH", downInterfacesByType.FTTH));
+    }
+    if (!customerType || customerType === "L2VPN") {
+      latestRowPromises.push(fetchLatestRowsForType("statusChangeHistories", "L2VPN", downInterfacesByType.L2VPN));
+    }
+
+    const latestRowGroups = await Promise.all(latestRowPromises);
+    for (const rows of latestRowGroups) {
+      latestRows.push(...rows);
+    }
 
     // Build the map from the already-deduplicated result set
     const latestStatusByInterface = new Map();
@@ -340,8 +423,13 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
     let skippedBecauseActuallyUp = 0;
 
     for (const [key, record] of latestStatusByInterface.entries()) {
-      // Skip if last recorded status wasn't "down"
-      if (record.newStatus !== "down") continue;
+      // Skip if last recorded status wasn't "down" — except L2VPN, where
+      // "mixed" (one hop of the circuit down) is also churn-worthy, per
+      // getActualDownOrMixedL2VPNCircuits above admitting both states.
+      const isChurnWorthyStatus =
+        record.newStatus === "down" ||
+        (record.customerType === "L2VPN" && record.newStatus === "mixed");
+      if (!isChurnWorthyStatus) continue;
 
       // VERIFY: Check if actually down in main table
       if (!actualDownInterfaces.has(key)) {
@@ -361,6 +449,9 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
         // stored as null in history (e.g. FTTH homeNumber stored before the fix)
         nbr: record.nbr || actualInfo?.nbr || null,
         cid: record.cid || actualInfo?.cid || null,
+        // FTTH-only: history doesn't carry the IP (identity is pppoeusername),
+        // so pull it from the live table for the customer detail/diagnose view.
+        ip: actualInfo?.ip || null,
         downSince,
         downtimeSeconds,
         downtimeFormatted: formatDuration(downtimeSeconds),
@@ -425,13 +516,15 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       });
     };
 
-    // Fetch untracked from all tables
-    const diaDown = await fetchUntrackedFromTable(db.diacustomers, db.customerinfos, "DIA");
-    const iptDown = await fetchUntrackedFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT");
-    const sharedDown = await fetchUntrackedFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED");
-    const l3vpnDown = await fetchUntrackedFromTable(db.l3vpncustomers, db.l3vpncustomerinfos, "L3VPN");
+    // Fetch untracked from all tables in parallel
+    const [diaDown, iptDown, sharedDown, l3vpnDown] = await Promise.all([
+      fetchUntrackedFromTable(db.diacustomers, db.customerinfos, "DIA"),
+      fetchUntrackedFromTable(db.iptcustomers, db.iptcustomerinfos, "IPT"),
+      fetchUntrackedFromTable(db.sharedcustomers, db.sharedcustomerinfos, "SHARED"),
+      fetchUntrackedFromTable(db.l3vpncustomers, db.l3vpncustomerinfos, "L3VPN"),
+    ]);
 
-    // FTTH untracked (ip is the identifier, pppoeusername is the customer name)
+    // FTTH untracked (pppoeusername is the identifier; ip is kept for display)
     const ftthDown = [];
     if (!excludeFtthFlag && (!customerType || customerType === "FTTH")) {
       for (const [key, c] of actualDownInterfaces.entries()) {
@@ -439,7 +532,7 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
         if (seenInterfaces.has(key)) continue;
         ftthDown.push({
           interface: c.interface,
-          ip: c.interface,
+          ip: c.ip || null,
           pppoeusername: c.pppoeusername || null,
           ip_version: c.ip_version || null,
           customerType: "FTTH",
@@ -460,7 +553,34 @@ exports.getExtendedDowntimeCustomers = async (req, res) => {
       }
     }
 
-    results.push(...diaDown, ...iptDown, ...sharedDown, ...l3vpnDown, ...ftthDown);
+    // L2VPN untracked (down/mixed circuits with no recorded transition yet,
+    // e.g. discovered before this run, or the tracked record's status
+    // didn't qualify as churn-worthy — see isChurnWorthyStatus above).
+    const l2vpnDown = [];
+    if (!customerType || customerType === "L2VPN") {
+      for (const [key, c] of actualDownInterfaces.entries()) {
+        if (c.customerType !== "L2VPN") continue;
+        if (seenInterfaces.has(key)) continue;
+        l2vpnDown.push({
+          interface: c.interface,
+          customerType: "L2VPN",
+          switchName: c.switchName,
+          customerName: c.customerName || null,
+          cid: null,
+          nbr: c.nbr || null,
+          previousStatus: "unknown",
+          newStatus: c.operationalStatus,
+          downSince: null,
+          downtimeSeconds: null,
+          downtimeFormatted: "Unknown (before tracking)",
+          churnRisk: "unknown",
+          source: "untracked",
+        });
+        seenInterfaces.add(key);
+      }
+    }
+
+    results.push(...diaDown, ...iptDown, ...sharedDown, ...l3vpnDown, ...ftthDown, ...l2vpnDown);
 
     // If customer_relation, filter to their watchlist only
     if (req.user?.role === "customer_relation") {
@@ -821,4 +941,3 @@ function calculateChurnRisk(downtimeSeconds) {
   if (downtimeSeconds < CHURN_THRESHOLDS.CHURNED) return "critical";  // < 2 weeks
   return "churned"; // >= 2 weeks - customer has likely churned
 }
-

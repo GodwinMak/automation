@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos Provider Escalation
+-->
+<knowledgeTopic>
+  <topic id="provider-escalation" title="Junos Provider Escalation" category="circuits">
+    <beforeEscalating>
+      <description>Collect:</description>
+      <item>Circuit ID / VC ID</item>
+      <item>Site / Device Hostname &amp; IP</item>
+      <item>Interface &amp; Unit Number</item>
+      <item>Incident Start Time &amp; Duration</item>
+      <item>Physical Interface Link State (show interfaces terse)</item>
+      <item>Optical Light Levels in dBm (show interfaces diagnostics optics)</item>
+      <item>Input/Output Error &amp; Framing Counters (show interfaces extensive)</item>
+      <item>Pseudowire / VC Connection State (show l2circuit connections)</item>
+      <item>IGP / BGP Adjacency Status (show isis adjacency / show bgp summary)</item>
+      <item>Impacted Services &amp; VLAN Tags</item>
+      <item>Diagnostic Tests Performed (MPLS VCCV Ping / ICMP Ping)</item>
+    </beforeEscalating>
+
+    <providerRequest>
+      <description>Ask the provider to check:</description>
+      <item>Remote handoff port link state and speed/duplex negotiation</item>
+      <item>Optical Tx/Rx power levels at provider demarcation point</item>
+      <item>Interface framing and CRC/FCS error counters</item>
+      <item>LOS / LOF / AIS alarms on transport path</item>
+      <item>Underlay transport network and middle-mile path health</item>
+      <item>Scheduled or unscheduled vendor maintenance activity</item>
+      <item>Transport equipment circuit alarms</item>
+      <item>Recent fiber cuts or maintenance changes on target path</item>
+    </providerRequest>
+
+    <evidencePrinciple>A provider escalation must contain concrete Junos operational telemetry (exact dBm light levels, flap timestamps, CRC error counts, and pseudowire status codes) rather than generic "circuit is down" claims.</evidencePrinciple>
+  </topic>
+</knowledgeTopic>

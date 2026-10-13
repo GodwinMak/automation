@@ -55,9 +55,6 @@ export function Navbar() {
   const socketRef = useRef(null);
   const timeoutRef = useRef(null); // Ref to store the timeout for the 'finished' state
 
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-
   // 🎯 State to track the update process
   const [updateStatus, setUpdateStatus] = useState(UPDATE_STATUS.IDLE);
 
@@ -69,29 +66,6 @@ export function Navbar() {
         upgrade: false
       });
       socketRef.current = socket;
-
-    // Register userId with backend for targeted notifications
-    if (user && user.id) {
-      socket.emit("register", user.id);
-    }
-
-    // Create an Audio instance for the notification sound
-    const audio = new Audio("/notification.mp3");
-
-    socket.on("linkDownAlert", (newNotification) => {
-      console.log("Received new notification:", newNotification);
-
-      setNotifications((prevNotifications) => [
-        newNotification,
-        ...prevNotifications,
-      ]);
-
-      setUnreadCount((prevCount) => prevCount + 1);
-
-      audio.play().catch((error) => {
-        console.error("Failed to play sound:", error);
-      });
-    });
 
     // 🎯 Listener for the update completion from the server
     socket.on("diaUpdateComplete", () => {
@@ -124,12 +98,6 @@ export function Navbar() {
     localStorage.removeItem("userData");
     dispatch({ type: "SIGN_OUT" });
     navigate("/");
-  };
-
-  const handleNotificationOpen = (isOpen) => {
-    if (isOpen) {
-      setUnreadCount(0);
-    }
   };
 
   // 🎯 Function to manually call the DIA update
@@ -257,7 +225,7 @@ export function Navbar() {
             {renderRefreshIcon()}
           </Button>
 
-          <Button
+          {/* <Button
             variant="ghost"
             size="sm"
             className="relative h-9 w-9 hover:bg-accent transition-colors"
@@ -265,7 +233,7 @@ export function Navbar() {
             title="Upload Billing Excel"
           >
             <Upload className="h-4 w-4" />
-          </Button>
+          </Button> */}
 
           {/* Notification Bell - Uses database notifications */}
           <NotificationBell />

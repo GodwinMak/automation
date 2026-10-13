@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const { Op } = require("sequelize");
 const db = require("../Models");
+const { withLock } = require("../utils/cronLock");
 
 module.exports = (options = {}) => {
   const StatusChangeHistory = db.statusChangeHistories;
@@ -8,31 +9,34 @@ module.exports = (options = {}) => {
 
   const cleanupStatusHistory = async () => {
     try {
-      const [lockRows] = await db.sequelize.query(
-        "SELECT GET_LOCK('status_history_cleanup', 0) AS acquired"
-      );
-      const acquired = lockRows?.[0]?.acquired === 1;
-      if (!acquired) {
-        console.warn("[StatusHistory Cleanup] Another instance is running. Skipping.");
-        return;
-      }
+      await withLock("status_history_cleanup", async () => {
+        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
-      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const mainDeleted = await StatusChangeHistory.destroy({
+          where: { changedAt: { [Op.lt]: cutoff } },
+        });
+        const ftthDeleted = await StatusChangeHistoryFtth.destroy({
+          where: { changedAt: { [Op.lt]: cutoff } },
+        });
 
-      const mainDeleted = await StatusChangeHistory.destroy({
-        where: { changedAt: { [Op.lt]: cutoff } },
+        console.log(
+          `[StatusHistory Cleanup] Deleted ${mainDeleted} main rows and ${ftthDeleted} FTTH rows older than 90 days.`
+        );
+
+        // cron_job_runs (utils/cronRunHistory.js) is written on every
+        // withLock() call across every cron — including sms_sender_cron,
+        // which runs every 15s — so it needs a much shorter retention than
+        // status history or it grows unbounded. The process-monitoring
+        // page only ever queries the last 90 days, so nothing older is
+        // ever read.
+        const runHistoryCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const runHistoryDeleted = await db.cronJobRuns.destroy({
+          where: { startedAt: { [Op.lt]: runHistoryCutoff } },
+        });
+        console.log(`[StatusHistory Cleanup] Deleted ${runHistoryDeleted} cron_job_runs rows older than 30 days.`);
       });
-      const ftthDeleted = await StatusChangeHistoryFtth.destroy({
-        where: { changedAt: { [Op.lt]: cutoff } },
-      });
-
-      console.log(
-        `[StatusHistory Cleanup] Deleted ${mainDeleted} main rows and ${ftthDeleted} FTTH rows older than 90 days.`
-      );
     } catch (error) {
       console.error("[StatusHistory Cleanup] Error:", error.message);
-    } finally {
-      await db.sequelize.query("SELECT RELEASE_LOCK('status_history_cleanup')");
     }
   };
 

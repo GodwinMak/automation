@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos System & Chassis Alarm Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="alarms" title="Junos System &amp; Chassis Alarm Troubleshooting" category="hardware">
+    <commands>
+      <command>show system alarms</command>
+      <command>show chassis alarms</command>
+      <command>show chassis environment</command>
+      <command>show chassis fan</command>
+    </commands>
+
+    <check>
+      <item>Active system and chassis alarms</item>
+      <item>Alarm severity (Yellow/Minor vs Red/Major)</item>
+      <item>Exact timestamp of alarm onset</item>
+      <item>Affected FRU or hardware component (FPC, PIC, SFP, RE, PSU, Fan Tray)</item>
+      <item>Environmental conditions (Inlet/Outlet temperature thresholds in Celsius)</item>
+      <item>Power conditions (PSU input/output voltage, feed failure, redundancy state)</item>
+    </check>
+
+    <alarmTypes>
+      <category name="Chassis &amp; Environmental Alarms">
+        <alarm name="PEM Failure / Power Supply Offline" severity="Red/Major">
+          <matchingPattern>Power Supply Failure | PEM Failure | Power Feed Lost</matchingPattern>
+          <description>Indicates a failed power supply unit (PSU/PEM), loss of input feed, or unpopulated power slot without redundancy.</description>
+        </alarm>
+        <alarm name="Over Temperature / Fan Failure" severity="Red/Major or Yellow/Minor">
+          <matchingPattern>Over Temperature | Temperature Shutdown | Fan Failure | Fan Speed Low</matchingPattern>
+          <description>Chassis temperature exceeded warning or critical thresholds, or a fan tray failure impaired chassis airflow.</description>
+        </alarm>
+        <alarm name="Routing Engine / Mastership Issue" severity="Red/Major">
+          <matchingPattern>RE Offline | Mastership Lost | Hard Disk Error</matchingPattern>
+          <description>Loss of communication with a secondary Routing Engine, disk failure, or split-brain mastership issue.</description>
+        </alarm>
+      </category>
+
+      <category name="Physical &amp; Interface Alarms">
+        <alarm name="Loss of Signal (LOS)" severity="Yellow/Minor">
+          <matchingPattern>Loss of Signal | RX Loss | Link Down</matchingPattern>
+          <description>SFP/XFP optic is receiving zero or degraded optical light power (Rx &lt; sensitivity threshold) from the fiber span.</description>
+        </alarm>
+        <alarm name="SFP Transceiver Unrecognized / Invalid" severity="Yellow/Minor">
+          <matchingPattern>Unrecognized Optics | SFP Not Supported | SFP I2C Read Error</matchingPattern>
+          <description>Inserted optical module failed I2C read, is non-vendor compliant, or unsupported on the specific FPC/PIC.</description>
+        </alarm>
+        <alarm name="Loss of Frame (LOF) / Alarm Indication Signal (AIS)" severity="Yellow/Minor">
+          <matchingPattern>Loss of Frame | Remote Defect Indication | AIS Received</matchingPattern>
+          <description>Framing layer mismatch or transport provider circuit defect downstream on the OTN/SONET/Ethernet span.</description>
+        </alarm>
+      </category>
+
+      <category name="System &amp; Protocol Alarms">
+        <alarm name="Rescue Configuration Missing" severity="Yellow/Minor">
+          <matchingPattern>Rescue configuration is not set</matchingPattern>
+          <description>System software missing a saved baseline rescue configuration state on storage media.</description>
+        </alarm>
+        <alarm name="License Expired / Grace Period Active" severity="Yellow/Minor">
+          <matchingPattern>License Expired | Feature Evaluation Expiring</matchingPattern>
+          <description>Licensed JunOS feature (e.g., L2VPN, Subscriber Management) operating without a valid permanent license key.</description>
+        </alarm>
+        <alarm name="Protocol / BGP Peer Down Alarm" severity="Yellow/Minor or Red/Major">
+          <matchingPattern>BGP Peer Down | Autodrop Active | Interface Down</matchingPattern>
+          <description>Monitored critical routing peer or tracking interface went offline, triggering a system-level alarm notification.</description>
+        </alarm>
+      </category>
+    </alarmTypes>
+
+    <workflow>Correlate system and chassis alarms with interface events, optical light levels (show interfaces diagnostics optics), and routing protocol changes. Never clear alarms (clear system alarms / clear chassis alarms) before capturing diagnostic telemetry evidence.</workflow>
+  </topic>
+</knowledgeTopic>

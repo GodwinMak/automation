@@ -44,5 +44,25 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER, // capacity in Mbps
       allowNull: true,
     },
+    old_upmbps: {
+      type: DataTypes.INTEGER, // capacity in Mbps
+      allowNull: true,
+    },
+    old_downmbps: {
+      type: DataTypes.INTEGER, // capacity in Mbps
+      allowNull: true,
+    },
+    expires_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    upgrade_type: {
+      type: DataTypes.ENUM("permanent", "temporary"),
+      allowNull: true,
+    },
+    isHighProfile: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   });
 };

@@ -4,6 +4,23 @@ const SharedCustomer = db.sharedcustomers;
 const ClientDb = db.client_dbs;
 const Sequelize = db.Sequelize;
 
+// Admin-only: flag/unflag a Shared customer as high profile
+exports.markHighProfile = async (req, res) => {
+  const { id } = req.params;
+  const { isHighProfile } = req.body;
+
+  try {
+    const info = await SharedCustomerInfo.findByPk(id);
+    if (!info) return res.status(404).json({ message: "Shared customer not found" });
+
+    await info.update({ isHighProfile: !!isHighProfile });
+    return res.status(200).json({ message: "Updated successfully", data: info });
+  } catch (error) {
+    console.error("Error updating high-profile flag for Shared customer:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 // Get single Shared customer by ID (with client_db)
 exports.getSharedCustomerById = async (req, res) => {
   const { id } = req.params;

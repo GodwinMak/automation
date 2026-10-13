@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos Circuit Down Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="circuit-down" title="Junos Circuit Down Troubleshooting" category="circuits">
+    <definition>A circuit is considered down when the physical link, underlying transport LSP, overlay pseudowire/EVPN service binding, or Layer 3 endpoint path is unavailable or materially degraded.</definition>
+
+    <workflow>
+      <step order="1">Physical interface and optics (DOM)</step>
+      <step order="2">VLAN encapsulation and unit configuration</step>
+      <step order="3">Underlay transport core (IS-IS/OSPF, LDP, RSVP-TE LSPs)</step>
+      <step order="4">Circuit signaling and pseudowire binding (L2Circuit/EVPN/VPLS)</step>
+      <step order="5">Layer 3 overlay and routing (IP, ARP, BGP)</step>
+      <step order="6">End-to-end OAM and diagnostic testing</step>
+    </workflow>
+
+    <commands>
+      <command>show interfaces terse &lt;interface&gt;</command>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      <command>show configuration | display set | match &lt;interface&gt;</command>
+      <command>show configuration | display set | match &lt;interface&gt;.&lt;unit&gt;</command>
+      <command>ping &lt;destination&gt;</command>
+      <command>traceroute &lt;destination&gt;</command>
+    </commands>
+
+    <determineFaultDomain>
+      <item>Local physical interface or low SFP optical light level (Rx/Tx)</item>
+      <item>Local framing, MTU, or VLAN ID tag encapsulation mismatch</item>
+      <item>Underlay IGP adjacency or core MPLS LSP transport failure</item>
+      <item>Pseudowire virtual circuit signaling or MTU mismatch</item>
+      <item>Provider or transport WAN handoff network issue</item>
+      <item>Overlay routing, BGP peering, or customer CPE configuration</item>
+    </determineFaultDomain>
+
+    <note>Record exact failure time, SFP optical light readings (dBm), pseudowire status history, and affected services before escalating.</note>
+  </topic>
+</knowledgeTopic>

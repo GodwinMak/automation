@@ -10,6 +10,12 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+
+# Nested git repo used to back up device configs to their own GitHub repo
+SwitchConfigs/
+
+# Generated report output from one-off scripts
+scripts/output/
 *.local
 .env
 .env.local

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Interface Down Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="interface-down" title="Juniper Interface Down Troubleshooting" category="interface">
+    <symptom>A physical or logical interface is down, causing loss of connectivity.</symptom>
+
+    <firstChecks>
+       <command>show interfaces descriptions | match &lt;interface&gt;</command>
+       <command>show interfaces descriptions | match &lt;interface&gt;.&lt;unit&gt;</command>
+    </firstChecks>
+
+    <stateInterpretation>
+      <case state="up up">Physical and logical layers are operational.</case>
+      <case state="up down">Physical layer is up but logical/protocol state is down.</case>
+      <case state="down down">Physical/link layer is down or administratively disabled.</case>
+      <case state="admin down">Interface has been administratively disabled.</case>
+    </stateInterpretation>
+
+    <troubleshooting>
+      <step order="1">Check whether the interface is administratively disabled.</step>
+      <step order="2">Check the far-end interface.</step>
+      <step order="3">Inspect alarms and physical errors.</step>
+      <step order="4">Verify speed, duplex, FEC, optics, and breakout configuration.</step>
+      <step order="5">Verify VLAN/tagging and encapsulation for logical interfaces.</step>
+      <step order="6">Confirm the expected IP address and subnet.</step>
+    </troubleshooting>
+
+    <usefulCommands>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      <command>show interfaces media &lt;interface&gt;</command>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+    </usefulCommands>
+
+    <commonRootCauses>
+      <item>Cable/fiber disconnected</item>
+      <item>Remote port down</item>
+      <item>Bad optic</item>
+      <item>Wrong speed</item>
+      <item>FEC mismatch</item>
+      <item>Incorrect breakout</item>
+      <item>Interface disabled</item>
+      <item>MTU mismatch</item>
+      <item>VLAN or encapsulation mismatch</item>
+    </commonRootCauses>
+
+    <evidence>Always record interface state, counters, optics diagnostics, configuration, alarms, and remote-end status before making changes.</evidence>
+  </topic>
+</knowledgeTopic>

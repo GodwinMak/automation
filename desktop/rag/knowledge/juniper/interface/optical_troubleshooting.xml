@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Optical Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="optical-troubleshooting" title="Juniper Optical Troubleshooting" category="interface">
+    <commands>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+    </commands>
+
+    <review>
+      <item>Laser state</item>
+      <item>Module temperature</item>
+      <item>Module voltage</item>
+      <item>Tx optical power</item>
+      <item>Rx optical power</item>
+    </review>
+
+    <diagnosis>Low or unstable receive power can indicate fiber loss, dirty connectors, bad patching, excessive distance, wrong optic type, or remote transmitter problems.</diagnosis>
+
+    <compareBothEnds>Collect optical diagnostics from both sides whenever possible.</compareBothEnds>
+
+    <actions>
+      <item>Clean fiber connectors according to approved procedure.</item>
+      <item>Check patching.</item>
+      <item>Verify optic type and wavelength.</item>
+      <item>Replace suspect patch lead or optic.</item>
+      <item>Escalate with optical readings and timestamps.</item>
+    </actions>
+
+    <warning>Do not replace hardware solely from one abnormal reading without checking the complete optical path.</warning>
+  </topic>
+</knowledgeTopic>

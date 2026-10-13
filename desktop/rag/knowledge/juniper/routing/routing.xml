@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Routing Troubleshooting Master Flow
+-->
+<knowledgeTopic>
+  <topic id="routing-master-flow" title="Juniper Master Routing and Traffic Flow Troubleshooting" category="routing">
+    
+    <scope>
+      Defines the top-down diagnostic order across the entire network topology (L1 Access Switches, L1/L2 Aggregation Routers, and L2 PE/P/BNG Core Nodes).
+    </scope>
+
+    <troubleshootingOrder>
+      <step order="1" phase="Layer 1 / Physical">Interface state (`show interfaces terse`)</step>
+      <step order="2" phase="Layer 2 / Subnet">IP addressing and subnet mask verification</step>
+      <step order="3" phase="Layer 2 / Resolution">ARP / IPv6 Neighbor Discovery (`show arp`, `show ipv6 neighbors`)</step>
+      <step order="4" phase="Layer 3 / IGP Adjacency">IS-IS adjacency across L1, L1/L2, or L2 links (`show isis adjacency`)</step>
+      <step order="5" phase="Layer 3 / IGP Database">IS-IS LSP database synchronization (`show isis database`)</step>
+      <step order="6" phase="Layer 3 / Route Table">IS-IS route calculation and RIB installation (`show route protocol isis`)</step>
+      <step order="7" phase="Layer 3 / Next-Hop">RIB next-hop resolution and recursive loopback lookup (`show route &lt;prefix&gt; detail`)</step>
+      <step order="8" phase="Forwarding Plane">FIB / Hardware Forwarding installation (`show route forwarding-table destination &lt;prefix&gt;`)</step>
+      <step order="9" phase="Overlay / Services">BGP session status andservice pseudowire (ps*) dependencies (`show bgp summary`)</step>
+      <step order="10" phase="Data Plane">End-to-end data plane testing using source-specific probes</step>
+    </troubleshootingOrder>
+
+    <pseudowireArpNote>Step 3's ARP check for a ps* subscriber pseudowire is NOT run on the local access switch — a ps* interface lives on the PE/BNG layer. Use `show arp no-resolve interface ps&lt;N&gt;.&lt;unit&gt;` against the PE/BNG candidate devices (see routing/arp.xml's bngSubscriberResolution section for the exact device list and the ps-number-equals-unit-number rule).</pseudowireArpNote>
+
+    <essentialCommands>
+      <command>show interfaces terse</command>
+      <command>show arp no-resolve</command>
+      <command>show isis adjacency</command>
+      <command>show isis database</command>
+      <command>show route protocol isis</command>
+      <command>show route &lt;prefix&gt;</command>
+      <command>show route &lt;prefix&gt; detail</command>
+      <command>show route forwarding-table destination &lt;prefix&gt;</command>
+      <command>show bgp summary</command>
+    </essentialCommands>
+
+    <importantPrinciple>
+      An IS-IS or BGP adjacency being UP does not guarantee that the required prefix is installed in the RIB or programmed into the forwarding plane (FIB).
+    </importantPrinciple>
+
+    <routingTableChecks>
+      <item>Prefix existence in `inet.0` or specific VRF routing instance</item>
+      <item>Originating protocol (Direct, Static, IS-IS L1, IS-IS L2, or BGP)</item>
+      <item>Route preference (Administrative Distance)</item>
+      <item>Next-hop validity and reachability</item>
+      <item>Active route selection flag (* mark)</item>
+      <item>Recursive next-hop resolution (e.g., resolving a BGP peer or BNG pseudowire over an IS-IS L2 loopback)</item>
+      <item>FIB installation status</item>
+    </routingTableChecks>
+
+    <forwardingTest>
+      <description>Always test data plane reachability using source-anchored commands from loopbacks or subscriber interfaces:</description>
+      <command>ping &lt;destination&gt; source &lt;local-loopback-ip&gt;</command>
+      <command>traceroute &lt;destination&gt; source &lt;local-loopback-ip&gt;</command>
+    </forwardingTest>
+  </topic>
+</knowledgeTopic>

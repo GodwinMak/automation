@@ -98,13 +98,19 @@ const FTTHCustomer = () => {
   const [expiryFilter, setExpiryFilter] = useState(initialExpiry);
   const [withinDays, setWithinDays] = useState("");
   const [ipVersionFilter, setIpVersionFilter] = useState("all");
+  const [freeFilter, setFreeFilter] = useState(
+    locationState?.freeFilter === "free" || locationState?.freeFilter === "nonfree"
+      ? locationState.freeFilter
+      : "all"
+  );
   const [exporting, setExporting] = useState(false);
 
   const buildQuery = () => {
     const base = `search=${search}&status=${statusFilter}&expiry=${expiryFilter}`;
     const wd = withinDays ? `&withinDays=${withinDays}` : "";
     const ipv = ipVersionFilter !== "all" ? `&ip_version=${ipVersionFilter}` : "";
-    return base + wd + ipv;
+    const free = freeFilter !== "all" ? `&freeStatus=${freeFilter}` : "";
+    return base + wd + ipv + free;
   };
 
   const handleExport = async () => {
@@ -146,7 +152,7 @@ const FTTHCustomer = () => {
       }
     };
     fetchCustomers();
-  }, [page, search, pageSize, statusFilter, expiryFilter, withinDays, ipVersionFilter]);
+  }, [page, search, pageSize, statusFilter, expiryFilter, withinDays, ipVersionFilter, freeFilter]);
 
   const handlePageSizeChange = (value: number) => {
     setPageSize(value);
@@ -427,6 +433,7 @@ const FTTHCustomer = () => {
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="active">Not Expired</SelectItem>
                 <SelectItem value="expired">Expired</SelectItem>
+                <SelectItem value="expiredOver">Expired Over N Days</SelectItem>
                 <SelectItem value="unavailable">Not Available</SelectItem>
               </SelectContent>
             </Select>
@@ -446,6 +453,21 @@ const FTTHCustomer = () => {
               </SelectContent>
             </Select>
 
+            <label className="mr-2 font-medium">Free Customer:</label>
+            <Select
+              value={freeFilter}
+              onValueChange={(value) => { setFreeFilter(value); setPage(1); }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Free Customer" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="free">Free</SelectItem>
+                <SelectItem value="nonfree">Non-Free</SelectItem>
+              </SelectContent>
+            </Select>
+
             <input
               type="number"
               min="1"
@@ -453,6 +475,8 @@ const FTTHCustomer = () => {
               placeholder={
                 expiryFilter === "expired"
                   ? "Expired last N days"
+                  : expiryFilter === "expiredOver"
+                  ? "Expired over N days (90)"
                   : expiryFilter === "active"
                   ? "Expiring in N days"
                   : expiryFilter === "unavailable"

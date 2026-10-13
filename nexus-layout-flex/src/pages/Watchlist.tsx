@@ -19,6 +19,7 @@ import {
   MessageSquare,
   ArrowUpCircle,
   ArrowDownCircle,
+  Waypoints,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -37,19 +38,21 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/hooks/use-toast";
 
 interface Favorite {
   id: string;
   customerId: string;
   customerName: string;
-  customerType: "DIA" | "IPT" | "Shared";
+  customerType: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH" | "L2VPN";
   interface: string;
   cid: string;
   nbr: string;
   notes: string;
   status: string;
   switchName: string;
+  smsAlertsEnabled: boolean;
   createdAt: string;
 }
 
@@ -58,6 +61,7 @@ interface Summary {
   diaCount: number;
   iptCount: number;
   sharedCount: number;
+  l2vpnCount: number;
   upCount: number;
   downCount: number;
 }
@@ -159,6 +163,28 @@ const Watchlist = () => {
     }
   };
 
+  const handleToggleSmsAlerts = async (favorite: Favorite) => {
+    const next = !favorite.smsAlertsEnabled;
+    setFavorites((prev) =>
+      prev.map((f) => (f.id === favorite.id ? { ...f, smsAlertsEnabled: next } : f))
+    );
+    try {
+      await axios.put(`${PRODUCTION_URL}/favorites/${favorite.id}/sms-alerts`, {
+        smsAlertsEnabled: next,
+      });
+    } catch (error) {
+      console.error("Error updating SMS alerts:", error);
+      setFavorites((prev) =>
+        prev.map((f) => (f.id === favorite.id ? { ...f, smsAlertsEnabled: !next } : f))
+      );
+      toast({
+        title: "Error",
+        description: "Failed to update SMS alert preference.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const openNotesModal = (favorite: Favorite) => {
     setSelectedFavorite(favorite);
     setNotes(favorite.notes || "");
@@ -173,6 +199,8 @@ const Watchlist = () => {
         return <Globe className="h-4 w-4 text-purple-500" />;
       case "Shared":
         return <Share2 className="h-4 w-4 text-orange-500" />;
+      case "L2VPN":
+        return <Waypoints className="h-4 w-4 text-teal-500" />;
       default:
         return <Network className="h-4 w-4" />;
     }
@@ -186,13 +214,23 @@ const Watchlist = () => {
         return "bg-purple-500/10 text-purple-500 border-purple-500/20";
       case "Shared":
         return "bg-orange-500/10 text-orange-500 border-orange-500/20";
+      case "L2VPN":
+        return "bg-teal-500/10 text-teal-500 border-teal-500/20";
       default:
         return "bg-muted text-muted-foreground";
     }
   };
 
   const navigateToCustomer = (favorite: Favorite) => {
-    console.log(favorite);
+    // L2VPN circuits have no standalone detail route to deep-link to like
+    // the other types (their view page needs a full computed circuit object
+    // with hops, not just the favorite's id/interface) — send the user to
+    // the circuits list pre-filtered by customer name instead.
+    if (favorite.customerType === "L2VPN") {
+      navigate("/l2vpn-circuits", { state: { search: favorite.customerName } });
+      return;
+    }
+
     const routes: Record<string, string> = {
       DIA: "/viewcustomer",
       IPT: "/view-ipt-customer",
@@ -251,6 +289,16 @@ const Watchlist = () => {
     { key: "nbr", label: "NBR" },
     { key: "switchName", label: "Switch" },
     {
+      key: "smsAlertsEnabled",
+      label: "SMS Alerts",
+      render: (row: Favorite) => (
+        <Switch
+          checked={row.smsAlertsEnabled}
+          onCheckedChange={() => handleToggleSmsAlerts(row)}
+        />
+      ),
+    },
+    {
       key: "notes",
       label: "Notes",
       render: (row: Favorite) => (
@@ -295,7 +343,7 @@ const Watchlist = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-7">
         <Card className="border-yellow-500/20">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -347,6 +395,20 @@ const Watchlist = () => {
           <CardContent>
             <div className="text-2xl font-bold text-orange-500">
               {summary?.sharedCount || 0}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-teal-500/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+              <Waypoints className="h-3 w-3 text-teal-500" />
+              L2VPN
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-teal-500">
+              {summary?.l2vpnCount || 0}
             </div>
           </CardContent>
         </Card>
@@ -406,6 +468,7 @@ const Watchlist = () => {
                 <SelectItem value="DIA">DIA</SelectItem>
                 <SelectItem value="IPT">IPT</SelectItem>
                 <SelectItem value="Shared">Shared</SelectItem>
+                <SelectItem value="L2VPN">L2VPN</SelectItem>
               </SelectContent>
             </Select>
           </>

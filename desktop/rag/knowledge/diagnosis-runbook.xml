@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Customer Diagnosis Runbook — DIA, L3VPN, IPT, FTTH
+
+  Practical "how to actually diagnose or troubleshooting of a customer" guide: what you need before
+  starting, which command to run at each step, what to look for in the
+  output, and what different results mean. Grounded in the logic and
+  thresholds actually implemented in backend/Controller/diagnosis.js,
+  phrased as decisions a NOC engineer makes, with the symptom → likely
+  cause reasoning made explicit. Steps marked general-engineering are
+  common Junos/optics knowledge that diagnosis.js surfaces the raw data
+  for but does not itself threshold or interpret in code — use them as
+  guidance, not as literal thresholds enforced anywhere in the system.
+-->
+<diagnosisRunbook version="1.0" source="backend/Controller/diagnosis.js">
+
+  <!-- ============================================================ -->
+  <!-- DIA                                                            -->
+  <!-- ============================================================ -->
+  <service id="dia" name="DIA (Dedicated Internet Access)">
+
+    <prerequisites>
+      <item>The customer's interface name (e.g. ps127.0) — from the diacustomers record.</item>
+      <item>SSH access (username/password) to the candidate devices: LTZ-BNG02-TIG-DAR, LTZ-BNG02-RAH-DAR, LTZ-PE1-RAH, LTZ-PE1-TIG. The customer could be homed on any of these — you don't need to know which in advance.</item>
+      <item candidateIps="197.155.94.100, 197.155.94.138, 41.175.38.42, 41.175.38.43">
+        For a ps* interface (e.g. ps4603.4603, ps4411.4411) where the device isn't already known, these are the candidate device IPs to check — try each in turn (e.g. via get_interface_config or run_live_diagnostics with just the unit number) until one reports the interface, same as the hostname-based candidate list above. The exact IP-to-hostname mapping among the four above hasn't been confirmed — treat them as "one of these four," not a specific pairing, unless confirmed on-device (e.g. from the CLI prompt after connecting).
+      </item>
+    </prerequisites>
+
+    <procedure>
+
+      <step order="1" title="Find the interface and confirm it's up">
+        <command>show interfaces descriptions | match {interfaceName}</command>
+        <runOn>Each of the 4 candidate devices, until you find one reporting this interface.</runOn>
+        <lookFor>The admin and operational status columns for the ps* line.</lookFor>
+        <interpretation>
+          <case result="not found on any device">
+            Interface doesn't exist on any candidate device — likely wrong interface name, or the
+            circuit was never provisioned / was deprovisioned. Verify the interface name against the
+            customer record before going further.
+          </case>
+          <case result="operational status = down">
+            The circuit is down at the BNG/PE. Skip ARP and ping entirely — a down interface has no
+            traffic to test. Go straight to Step 4 (neighbor link check) to find WHERE the fault is.
+          </case>
+          <case result="operational status = up">
+            Continue to Step 2.
+          </case>
+        </interpretation>
+      </step>
+
+      <step order="2" title="Discover the customer's live IP via ARP">
+        <command>show arp no-resolve interface {interfaceName}</command>
+        <runOn>The device where the interface was found up.</runOn>
+        <lookFor>Any IPv4 address in the output.</lookFor>
+        <interpretation>
+          <case result="no IP found">
+            The interface is up at the BNG but the customer's router/CPE isn't ARPing — usually means
+            the CPE is powered off, not cabled up, or misconfigured on its WAN side. This is NOT
+            necessarily a network-side fault. Still go to Step 4 to rule out a physical-layer problem
+            on the access side before pointing at the customer's equipment.
+          </case>
+          <case result="one or more IPs found">
+            Continue to Step 3.
+          </case>
+        </interpretation>
+      </step>
+
+      <step order="3" title="Ping the customer's IP(s)">
+        <command>ping {ip} rapid count 20</command>
+        <runOn>The device where the interface was found up (pings out through it toward the customer).</runOn>
+        <note>Up to 5 discovered IPs are tried; the check stops at the first "problematic" one.</note>
+        <lookFor>Packet loss % and average round-trip latency (ms).</lookFor>
+        <interpretation>
+          <case result="packet loss &gt; 20% OR avg latency &gt; 25ms">
+            Marked "problematic" — customer is up but experiencing issues. Go to Step 4: this is
+            usually explained by a physical-layer problem (flapping port, low optical power) on the
+            access/metro leg, but can also be upstream congestion if Step 4 comes back clean.
+          </case>
+          <case result="packet loss = 100%">
+            Interface and ARP are up but the customer host is completely unreachable — check CPE power
+            and whether the customer's router itself has failed, in addition to Step 4's link check.
+          </case>
+          <case result="packet loss &lt;= 20% AND avg latency &lt;= 25ms">
+            Ping is healthy. Combine with Step 4's link check for a full "Customer is healthy" verdict
+            — a clean ping with a flapping/low-power port is still worth flagging as at-risk even
+            though the code labels it healthy.
+          </case>
+        </interpretation>
+      </step>
+
+      <step order="4" title="Check the physical link on the access/metro neighbor">
+        <description>
+          Run in every branch above (down, no-ARP, ping-issue, and healthy) — it explains WHERE in the
+          chain a fault sits, or confirms the physical layer is clean when everything else looks fine.
+        </description>
+        <subStep order="4a">
+          <command>show l2circuit connections interface {base}.0 | match Neighbor</command>
+          <runOn>The BNG/PE from Step 1.</runOn>
+          <lookFor>The "Neighbor: x.x.x.x" IP.</lookFor>
+          <interpretation>
+            <case result="no neighbor IP found">
+              The l2circuit itself has no neighbor recorded — likely a config problem on the pseudowire
+              (missing/wrong neighbor statement), not a physical fault. Escalate as a config issue
+              rather than a field/cable issue.
+            </case>
+          </interpretation>
+        </subStep>
+        <subStep order="4b">
+          <command>show interfaces descriptions | match {base}</command>
+          <runOn>The neighbor device found in 4a (SSH directly to its IP).</runOn>
+          <lookFor>A ge-*/xe-* physical port whose description references this circuit.</lookFor>
+          <interpretation>
+            <case result="no matching port found">
+              The neighbor doesn't have a port tagged for this circuit — description/provisioning
+              mismatch between the BNG's l2circuit config and the access switch's interface
+              description. Treat as a provisioning/config issue.
+            </case>
+          </interpretation>
+        </subStep>
+        <subStep order="4c">
+          <command>show interfaces {customerPort} | match flapped</command>
+          <lookFor>"Last flapped" timestamp and how long ago.</lookFor>
+          <interpretation>
+            A very recent or frequently-recurring flap timestamp lines up with intermittent
+            packet loss / high latency from Step 3 — points to an unstable physical connection
+            (loose patch cable, failing SFP, intermittent fiber fault) rather than a congestion issue.
+          </interpretation>
+        </subStep>
+        <subStep order="4d">
+          <command>show interface diagnostics optics {customerPort} | match power | except off</command>
+          <lookFor>Receive/transmit optical power in dBm.</lookFor>
+          <interpretation generalEngineering="true">
+            Very low or missing receive power (well below the optic's normal operating range, or
+            reported as an alarm/warning threshold breach) typically means a fiber problem: a bend,
+            a dirty/damaged connector, excessive attenuation, or a degrading SFP transceiver. Power
+            within the optic's normal range with an otherwise-clean interface points away from the
+            physical layer and toward something upstream (congestion, core issue) or on the customer's
+            own equipment.
+          </interpretation>
+        </subStep>
+        <subStep order="4e">
+          <command>show interfaces {customerPort} | match Media</command>
+          <lookFor>Fiber vs Copper.</lookFor>
+          <interpretation>Confirms which class of physical fault is even possible (optics diagnostics only matter on fiber ports).</interpretation>
+        </subStep>
+      </step>
+
+    </procedure>
+
+    <symptomToCauseSummary>
+      <row symptom="Interface down + no neighbor found in 4a">Likely l2circuit/pseudowire config issue, not a cable fault.</row>
+      <row symptom="Interface down + neighbor/port found + recent flap + low optical power">Physical fault (fiber cut, dirty connector, failing SFP) — dispatch field/access team.</row>
+      <row symptom="Interface up, no ARP, port healthy in Step 4">Customer-side issue — CPE likely powered off or misconfigured; ask customer to check equipment.</row>
+      <row symptom="Ping problematic + flaps/low power on Step 4">Physical-layer cause of the packet loss/latency.</row>
+      <row symptom="Ping problematic + Step 4 completely clean">Not a physical-layer problem — investigate upstream congestion, policer/rate-limit sizing, or core routing.</row>
+      <row symptom="Ping healthy + Step 4 clean">Customer is genuinely fine at the network layer; any complaint likely lives past their router (LAN/application-level).</row>
+    </symptomToCauseSummary>
+
+  </service>
+
+  <!-- ============================================================ -->
+  <!-- L3VPN                                                          -->
+  <!-- ============================================================ -->
+  <service id="l3vpn" name="L3VPN">
+
+    <prerequisites>
+      <item>The customer's interface name — from l3vpncustomerinfos.</item>
+      <item>The customer's routing-instance (route_instance), pulled from the DB record — needed to ping inside the correct VRF.</item>
+      <item>SSH access to the 2 candidate PE devices: LTZ-PE1-RAH, LTZ-PE1-TIG.</item>
+    </prerequisites>
+
+    <procedure>
+      <description>
+        Identical shape to DIA's procedure (interface check → ARP → ping → neighbor link check), with
+        two differences called out below. Everything else — interpretation of down/flap/optics
+        results, the symptomToCauseSummary — applies the same way, so it isn't repeated here.
+      </description>
+      <difference step="2" area="ARP parsing">
+        Uses a stricter MAC-anchored match (only lines that look like a real ARP table row are
+        accepted). If ARP output exists but nothing is captured, double check the interface is really
+        in the expected routing-instance rather than assuming the customer has no IP.
+      </difference>
+      <difference step="3" area="ping command">
+        <command condition="route_instance present">ping routing-instance {route_instance} {ip} rapid count 20</command>
+        <command condition="route_instance missing">ping {ip} rapid count 20</command>
+        <interpretation>
+          If route_instance is missing/null in the DB record, the ping falls back to the global routing
+          table — this can produce a false "unreachable" result for a VRF-only customer IP that isn't
+          routed globally. If you get 100% loss on an L3VPN customer, confirm route_instance was
+          actually populated before concluding the customer is down.
+        </interpretation>
+      </difference>
+    </procedure>
+
+  </service>
+
+  <!-- ============================================================ -->
+  <!-- IPT                                                            -->
+  <!-- ============================================================ -->
+  <service id="ipt" name="IPT">
+
+    <prerequisites>
+      <item>The customer's interface name — from iptcustomerinfos.</item>
+      <item>SSH access to the 3 candidate devices: LTZ-PE1-RAH, LTZ-PE1-TIG, LTZ-P1-DAR.</item>
+      <item>Knowledge that IPT customers peer BGP with the PE — this diagnosis checks the routing session, not raw reachability.</item>
+    </prerequisites>
+
+    <procedure>
+
+      <step order="1" title="Find the interface and confirm it's up">
+        <command>show interfaces descriptions | match {interfaceName}</command>
+        <runOn>Each of the 3 candidate devices.</runOn>
+        <interpretation>
+          <case result="down">Skip everything below — go straight to the neighbor link check (Step 5, same as DIA Step 4).</case>
+          <case result="up">Continue to Step 2.</case>
+        </interpretation>
+      </step>
+
+      <step order="2" title="Discover the customer's IP via ARP">
+        <command>show arp no-resolve interface {interfaceName}</command>
+        <lookFor>Only the FIRST IP found is used for the BGP checks below (not all of them, unlike DIA/L3VPN).</lookFor>
+        <interpretation>
+          <case result="no IP found">Interface up but no ARP entry — same customer-CPE-not-connected reasoning as DIA. Go to the neighbor link check (Step 5) and stop.</case>
+        </interpretation>
+      </step>
+
+      <step order="3" title="Check the BGP session state">
+        <command>show bgp summary | match {customerIp}</command>
+        <lookFor>The peer's AS number (2nd whitespace-delimited field) and implicitly whether a row exists at all.</lookFor>
+        <interpretation>
+          <case result="no matching row / no ASN parsed">
+            No BGP session for this peer IP. The interface and ARP are fine, but routing was never
+            established — check the customer's router BGP config (wrong peer-IP, wrong local ASN,
+            missing neighbor statement, or an auth/MD5 mismatch) before assuming a network fault. Still
+            worth a quick pass through Step 5 to rule out a flapping link causing the session to never
+            stabilize.
+          </case>
+          <case result="ASN parsed, but you separately confirm state is not Established (Active/Connect/Idle)">
+            Session is attempting but not up — commonly a TCP-reachability problem (ACL, firewall,
+            physical link) rather than a config typo. Step 5's link check is more likely to explain
+            this than a pure config review.
+          </case>
+          <case result="ASN parsed and session Established">Continue to Step 4.</case>
+        </interpretation>
+      </step>
+
+      <step order="4" title="Check routes actually received from the customer">
+        <command>show route receive-protocol bgp {customerIp} | match {asn}</command>
+        <lookFor>Any CIDR prefixes in the output.</lookFor>
+        <interpretation>
+          <case result="zero routes despite an Established session">
+            The session is up but the customer isn't advertising anything — this is a customer-side
+            routing config issue (nothing in their route-map/network statement), not a network-side
+            fault. Session-established-with-no-routes is easy to mistake for "healthy" if you only
+            check Step 3.
+          </case>
+          <case result="one or more routes present">Customer is genuinely healthy — BGP up and actively advertising.</case>
+        </interpretation>
+      </step>
+
+      <step order="5" title="Check the physical link on the access/metro neighbor">
+        <description>Same sub-steps as DIA Step 4 (l2circuit neighbor → port → flaps → optics → media) — see that service's symptomToCauseSummary for interpretation; it applies unchanged here.</description>
+      </step>
+
+    </procedure>
+
+    <symptomToCauseSummary>
+      <row symptom="Interface up, ARP found, no BGP row at all">Customer router-side BGP config problem (peer IP/ASN/auth) — verify with the customer before dispatching a technician.</row>
+      <row symptom="Interface up, ARP found, BGP session flapping or stuck in Active/Connect/Idle">Check Step 5's link health first — a flapping physical link commonly prevents BGP from staying Established.</row>
+      <row symptom="BGP Established, zero received routes">Customer-side routing/advertisement issue, not a network fault — session is fine, their announcement isn't.</row>
+      <row symptom="BGP Established with routes present">Customer is healthy.</row>
+    </symptomToCauseSummary>
+
+  </service>
+
+  <!-- ============================================================ -->
+  <!-- FTTH                                                           -->
+  <!-- ============================================================ -->
+  <service id="ftth" name="FTTH">
+
+    <prerequisites>
+      <item>The customer's IP address (not an interface name — FTTH diagnosis has no Junos interface concept).</item>
+      <item>No SSH/device access needed — this check runs entirely from the application server.</item>
+    </prerequisites>
+
+    <procedure>
+
+      <step order="1" title="Check subscription/expiry status first">
+        <description>Pulled from the ftthcustomers DB record, before any network probe.</description>
+        <lookFor>topUpExpiry date relative to now, and isFreeCustomer.</lookFor>
+        <interpretation>
+          <case result="expired, not a free customer">
+            Even if the ping in Step 2 succeeds or fails, an expired non-free subscription is the
+            first thing to rule out — a "no_service" result for an expired customer is expected
+            behavior (their access may be intentionally restricted), not a fault to troubleshoot.
+          </case>
+          <case result="active / free customer">Proceed to Step 2 as a genuine connectivity check.</case>
+        </interpretation>
+      </step>
+
+      <step order="2" title="Ping the customer IP directly">
+        <command>ping -c 3 -W 1 {ip}</command>
+        <runOn>The application server itself — not any network device.</runOn>
+        <lookFor>Packet loss % (only 3 probes, so this is a coarse check, not a stability measurement like DIA's 20-count ping).</lookFor>
+        <interpretation>
+          <case result="100% packet loss">
+            Reported as "no_service". Because there's no device-level check in this flow (no interface
+            status, no ONT/OLT visibility), 100% loss here does NOT distinguish between: expired
+            subscription (already ruled out in Step 1), ONT/router powered off, a fiber fault on the
+            GPON access network, or an OLT-side problem. If Step 1 showed an active subscription, this
+            needs escalation to whatever tooling covers the GPON/OLT layer — this diagnosis stops at
+            "unreachable", it can't see further into the access network.
+          </case>
+          <case result="less than 100% loss">
+            Reported as "active" / "Customer is up with active service" — no latency/jitter threshold
+            is applied (unlike DIA's &gt;25ms rule), so even a poor-but-not-fully-dead connection is
+            reported simply as active. If the customer is complaining about slowness with a
+            non-100%-loss result here, this tool won't surface it — you'll need a manual ping with a
+            higher count/duration, or Zabbix/OLT-side data, to see degradation.
+          </case>
+        </interpretation>
+      </step>
+
+    </procedure>
+
+    <symptomToCauseSummary>
+      <row symptom="Expired subscription + 100% loss">Expected — access intentionally restricted, not a technical fault.</row>
+      <row symptom="Active subscription + 100% loss">Genuine outage — ONT/router power, fiber fault, or OLT-side issue; escalate to GPON/access team since this tool has no visibility past "unreachable".</row>
+      <row symptom="Active subscription + partial/no loss but customer reports slowness">This diagnosis won't detect it (no latency threshold) — investigate manually via extended ping, Zabbix, or OLT statistics.</row>
+    </symptomToCauseSummary>
+
+  </service>
+
+</diagnosisRunbook>

@@ -56,6 +56,10 @@ module.exports = (sequelize, DataTypes) => {
     upgrade_type: {
       type: DataTypes.ENUM("permanent", "temporary"),
       allowNull: true,
-    }
+    },
+    isHighProfile: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
   });
 };

@@ -18,6 +18,8 @@ module.exports = (io, options = {}) => {
   const iptcustomerinfos = db.iptcustomerinfos;
   const sharedcustomers = db.sharedcustomers;
   const sharedcustomerinfos = db.sharedcustomerinfos;
+  const l3vpncustomers = db.l3vpncustomers;
+  const l3vpncustomersinfo = db.l3vpncustomerinfos
 
   // === SWITCH INFO ===
   const bng = [
@@ -36,6 +38,9 @@ module.exports = (io, options = {}) => {
     { name: "LTZ-ACC2-RAH", host: "41.175.37.20" },
     { name: "LTZ-ACC3-RAH", host: "41.175.37.21" },
   ];
+
+  const normalize = (v) => String(v || "").trim().toLowerCase();
+  const buildActiveKey = (switchName, iface) => `${normalize(switchName)}::${normalize(iface)}`;
 
   // === HELPER FUNCTIONS ===
   // Run command over SSH
@@ -66,7 +71,8 @@ module.exports = (io, options = {}) => {
   const getActiveInterfacesFromNetwork = async () => {
     console.log("[Cleanup] Fetching active interfaces from network devices...");
 
-    const activeInterfaces = new Set();
+    const activeBySwitchAndInterface = new Set();
+    const activeInterfaceNames = new Set();
 
     try {
       // Get interfaces from BNG switches
@@ -74,7 +80,7 @@ module.exports = (io, options = {}) => {
         bng.map(async (sw) => {
           console.log(`[Cleanup] Fetching from BNG ${sw.name}...`);
           const output = await runCommand(sw.host, "show interfaces descriptions");
-          return parseInterfaces(output);
+          return parseInterfaces(output, sw.name);
         })
       );
 
@@ -83,7 +89,7 @@ module.exports = (io, options = {}) => {
         pe.map(async (p) => {
           console.log(`[Cleanup] Fetching from PE ${p.name}...`);
           const output = await runCommand(p.host, "show interfaces descriptions");
-          return parseInterfaces(output);
+          return parseInterfaces(output, p.name);
         })
       );
 
@@ -92,7 +98,7 @@ module.exports = (io, options = {}) => {
         p.map(async (pr) => {
           console.log(`[Cleanup] Fetching from P ${pr.name}...`);
           const output = await runCommand(pr.host, "show interfaces descriptions");
-          return parseInterfaces(output);
+          return parseInterfaces(output, pr.name);
         })
       );
 
@@ -106,21 +112,28 @@ module.exports = (io, options = {}) => {
           } else if (ac.name.includes("ACC3")) {
             output = await runCommand(ac.host, "show configuration |display set |match ge-0/0/36 |match virtual-circuit-id");
           }
-          return parseInterfaces(output);
+          return parseInterfaces(output, ac.name);
         })
       );
 
       // Process results and collect active interfaces
       [...bngResults, ...peResults, ...pResults, ...accResults].forEach(result => {
         if (result.status === "fulfilled") {
-          result.value.forEach(iface => activeInterfaces.add(iface));
+          result.value.forEach((entry) => {
+            if (!entry?.interface) return;
+            activeInterfaceNames.add(normalize(entry.interface));
+            if (entry.switchName) {
+              activeBySwitchAndInterface.add(buildActiveKey(entry.switchName, entry.interface));
+            }
+          });
         } else {
           console.error("[Cleanup] Error fetching from device:", result.reason.message);
         }
       });
 
-      console.log(`[Cleanup] Found ${activeInterfaces.size} active interfaces on network`);
-      return activeInterfaces;
+      console.log(`[Cleanup] Found ${activeInterfaceNames.size} active interface names on network`);
+      console.log(`[Cleanup] Found ${activeBySwitchAndInterface.size} active switch+interface pairs on network`);
+      return { activeBySwitchAndInterface, activeInterfaceNames };
 
     } catch (error) {
       console.error("[Cleanup] Error fetching active interfaces:", error.message);
@@ -129,7 +142,7 @@ module.exports = (io, options = {}) => {
   };
 
   // Parse interfaces from command output
-  const parseInterfaces = (output) => {
+  const parseInterfaces = (output, switchName) => {
     if (!output) return [];
 
     return output
@@ -146,28 +159,41 @@ module.exports = (io, options = {}) => {
         if (trimmed.startsWith("ps")) {
           // Original format for BNG/PE/P switches
           const match = trimmed.split(/\s+/);
-          return match[0]; // Just the interface name (e.g., ps4405.1)
+          return { switchName, interface: match[0] }; // e.g., ps4405.1
         } else if (trimmed.startsWith("set protocols l2circuit")) {
           // New format for ACC switches - keep in ge format to match database
           const match = trimmed.match(/interface ([^\s]+).*virtual-circuit-id/);
           if (match) {
-            return match[1]; // e.g., ge-0/0/63.1007 - keep as-is to match database format
+            return { switchName, interface: match[1] }; // e.g., ge-0/0/63.1007
           }
         }
 
         return null;
       })
-      .filter(iface => iface !== null);
+      .filter(entry => entry !== null);
+  };
+
+  const isInterfaceActive = (customer, activeSets) => {
+    const iface = normalize(customer?.interface);
+    if (!iface) return false;
+
+    const sw = normalize(customer?.switchName);
+    if (sw) {
+      return activeSets.activeBySwitchAndInterface.has(buildActiveKey(sw, iface));
+    }
+
+    // Legacy fallback for rows that do not have switchName populated.
+    return activeSets.activeInterfaceNames.has(iface);
   };
 
   // Clean up DIA customers
-  const cleanupDIACustomers = async (activeInterfaces) => {
+  const cleanupDIACustomers = async (activeSets) => {
     console.log("[Cleanup DIA] Starting cleanup...");
 
     try {
       // Get all DIA customers from database
       const diaCustomers = await diacustomer.findAll({
-        attributes: ["id", "interface"],
+        attributes: ["id", "interface", "switchName"],
         raw: true
       });
 
@@ -175,7 +201,7 @@ module.exports = (io, options = {}) => {
 
       // Find customers not in active interfaces
       const staleCustomers = diaCustomers.filter(customer =>
-        !activeInterfaces.has(customer.interface)
+        !isInterfaceActive(customer, activeSets)
       );
 
       console.log(`[Cleanup DIA] Found ${staleCustomers.length} stale DIA customers to remove`);
@@ -203,14 +229,57 @@ module.exports = (io, options = {}) => {
     }
   };
 
+  // clean up L3VPN customers
+  const cleanupL3VPNCustomers = async (activeSets) => {
+    console.log("[Cleanup L3VPN] Starting cleanup...");
+
+    try {
+      // Get all L3VPN customers from database
+      const l3vpnCustomers = await l3vpncustomers.findAll({
+        attributes: ["id", "interface", "switchName"],
+        raw: true
+      });
+
+      console.log(`[Cleanup L3VPN] Found ${l3vpnCustomers.length} L3VPN customers in database`);
+
+      // Find customers not in active interfaces
+      const staleCustomers = l3vpnCustomers.filter(customer =>
+        !isInterfaceActive(customer, activeSets)
+      );
+
+      console.log(`[Cleanup L3VPN] Found ${staleCustomers.length} stale L3VPN customers to remove`);
+
+      if (staleCustomers.length > 0) {
+        // Remove from l3vpncustomers table
+        const staleIds = staleCustomers.map(c => c.id);
+        await l3vpncustomers.destroy({
+          where: { id: { [Op.in]: staleIds } }
+        });
+
+        // Also remove from l3vpncustomerinfos table
+        await l3vpncustomersinfo.destroy({
+          where: { interface: { [Op.in]: staleCustomers.map(c => c.interface) } }
+        });
+
+        console.log(`[Cleanup L3VPN] Removed ${staleCustomers.length} stale L3VPN customers and their info records`);
+      }
+
+      return staleCustomers.length;
+
+    } catch (error) {
+      console.error("[Cleanup L3VPN] Error:", error.message);
+      return 0;
+    }
+  };
+
   // Clean up IPT customers
-  const cleanupIPTCustomers = async (activeInterfaces) => {
+  const cleanupIPTCustomers = async (activeSets) => {
     console.log("[Cleanup IPT] Starting cleanup...");
 
     try {
       // Get all IPT customers from database
       const iptCustomers = await iptcustomers.findAll({
-        attributes: ["id", "interface"],
+        attributes: ["id", "interface", "switchName"],
         raw: true
       });
 
@@ -218,7 +287,7 @@ module.exports = (io, options = {}) => {
 
       // Find customers not in active interfaces
       const staleCustomers = iptCustomers.filter(customer =>
-        !activeInterfaces.has(customer.interface)
+        !isInterfaceActive(customer, activeSets)
       );
 
       console.log(`[Cleanup IPT] Found ${staleCustomers.length} stale IPT customers to remove`);
@@ -247,13 +316,13 @@ module.exports = (io, options = {}) => {
   };
 
   // Clean up Shared customers
-  const cleanupSharedCustomers = async (activeInterfaces) => {
+  const cleanupSharedCustomers = async (activeSets) => {
     console.log("[Cleanup Shared] Starting cleanup...");
 
     try {
       // Get all Shared customers from database
       const sharedCustomers = await sharedcustomers.findAll({
-        attributes: ["id", "interface"],
+        attributes: ["id", "interface", "switchName"],
         raw: true
       });
 
@@ -261,7 +330,7 @@ module.exports = (io, options = {}) => {
 
       // Find customers not in active interfaces
       const staleCustomers = sharedCustomers.filter(customer =>
-        !activeInterfaces.has(customer.interface)
+        !isInterfaceActive(customer, activeSets)
       );
 
       console.log(`[Cleanup Shared] Found ${staleCustomers.length} stale Shared customers to remove`);
@@ -295,25 +364,28 @@ module.exports = (io, options = {}) => {
 
     try {
       // Get active interfaces from network
-      const activeInterfaces = await getActiveInterfacesFromNetwork();
+      const activeSets = await getActiveInterfacesFromNetwork();
 
-      if (activeInterfaces.size === 0) {
+      if (activeSets.activeInterfaceNames.size === 0) {
         console.log("[Stale Customer Cleanup] No active interfaces found on network, skipping cleanup");
         return;
       }
 
       // Clean up each customer type
-      const diaRemoved = await cleanupDIACustomers(activeInterfaces);
-      const iptRemoved = await cleanupIPTCustomers(activeInterfaces);
-      const sharedRemoved = await cleanupSharedCustomers(activeInterfaces);
+      const diaRemoved = await cleanupDIACustomers(activeSets);
+      const iptRemoved = await cleanupIPTCustomers(activeSets);
+      const sharedRemoved = await cleanupSharedCustomers(activeSets);
+      const l3vpnRemoved = await cleanupL3VPNCustomers(activeSets);
 
-      const totalRemoved = diaRemoved + iptRemoved + sharedRemoved;
+      const totalRemoved = diaRemoved + iptRemoved + sharedRemoved + l3vpnRemoved;
 
       console.log(`\n[Stale Customer Cleanup] Summary:`);
       console.log(`- DIA customers removed: ${diaRemoved}`);
       console.log(`- IPT customers removed: ${iptRemoved}`);
       console.log(`- Shared customers removed: ${sharedRemoved}`);
+      console.log(`- L3VPN customers removed: ${l3vpnRemoved}`);
       console.log(`- Total customers removed: ${totalRemoved}`);
+      
 
       // Emit notification if customers were removed
       if (totalRemoved > 0 && io) {
@@ -322,6 +394,7 @@ module.exports = (io, options = {}) => {
           diaRemoved,
           iptRemoved,
           sharedRemoved,
+          l3vpnRemoved,
           timestamp: new Date().toISOString()
         });
       }

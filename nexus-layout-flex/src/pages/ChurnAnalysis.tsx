@@ -23,13 +23,16 @@ import {
   Users,
   UserX,
   Skull,
+  Cable,
+  MapPin,
+  Globe,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -115,6 +118,21 @@ interface ExtendedDowntime {
   source: "tracked" | "untracked";
   downtimeFormatted: string;
   churnRisk: string;
+  // FTTH only — interface is the pppoeusername (stable identity); ip is
+  // kept separately since it can change between PPPoE sessions.
+  ip?: string | null;
+}
+
+interface FiberCutIncident {
+  id: string;
+  scope: "NBR" | "GLOBAL";
+  nbr: string | null;
+  status: "open" | "resolved" | "closed";
+  startedAt: string;
+  customerCount: number;
+  restoredCount: number;
+  stillDownCount: number;
+  durationFormatted: string;
 }
 
 interface ChurnSummary {
@@ -148,6 +166,7 @@ const COLORS = {
   SHARED: "#06b6d4",
   L3VPN: "#10b981",
   FTTH: "#14b8a6",
+  L2VPN: "#6366f1",
   down: "#ef4444",
   up: "#22c55e",
   warning: "#f59e0b",
@@ -174,9 +193,6 @@ export default function ChurnAnalysis() {
   const [timeRange, setTimeRange] = useState("30");
   const [customerTypeFilter, setCustomerTypeFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [includeFtth, setIncludeFtth] = useState(
-    () => localStorage.getItem("churn_includeFtth") === "1"
-  );
 
   // Pagination states
   const [atRiskPage, setAtRiskPage] = useState(1);
@@ -195,34 +211,34 @@ export default function ChurnAnalysis() {
   const [ftthDowntime, setFtthDowntime] = useState<ExtendedDowntime[]>([]);
   const [recentChanges, setRecentChanges] = useState<StatusChange[]>([]);
   const [patterns, setPatterns] = useState<any>(null);
+  const [fiberCutIncidents, setFiberCutIncidents] = useState<FiberCutIncident[]>([]);
 
   // Fetch all data
   const fetchData = async () => {
     setLoading(true);
     try {
       const typeParam = customerTypeFilter !== "all" ? `&customerType=${customerTypeFilter}` : "";
-      const excludeFtthParam = includeFtth ? "" : "?excludeFtth=1";
 
-      const [summaryRes, unstableRes, downtimeRes, changesRes, patternsRes] = await Promise.all([
+      const [summaryRes, unstableRes, downtimeRes, changesRes, patternsRes, incidentsRes] = await Promise.all([
         axios.get(`${PRODUCTION_URL}/churn-analysis/summary?days=${timeRange}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/unstable?days=${timeRange}&minChanges=3${typeParam}`),
-        // Always fetch all types for downtime — split FTTH on the frontend
-        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime${excludeFtthParam}`),
+        axios.get(`${PRODUCTION_URL}/churn-analysis/extended-downtime`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/changes?pageSize=50${typeParam}`),
         axios.get(`${PRODUCTION_URL}/churn-analysis/patterns?days=${timeRange}${typeParam}`),
+        axios.get(`${PRODUCTION_URL}/fiber-cut-incidents?status=all&pageSize=10`),
       ]);
 
       const downtimeData = downtimeRes.data.data || {};
       const nonFtthDowntime: ExtendedDowntime[] = downtimeData.nonFtth?.results || [];
-      const ftthOnlyDowntime: ExtendedDowntime[] = includeFtth
-        ? downtimeData.ftth?.results || []
-        : [];
+      const ftthOnlyDowntime: ExtendedDowntime[] = downtimeData.ftth?.results || [];
+
       setSummary(summaryRes.data);
       setUnstableCustomers(unstableRes.data.data || []);
       setExtendedDowntime(nonFtthDowntime);
       setFtthDowntime(ftthOnlyDowntime);
       setRecentChanges(changesRes.data.data || []);
       setPatterns(patternsRes.data);
+      setFiberCutIncidents(incidentsRes.data.data || []);
     } catch (error) {
       console.error("Error fetching churn data:", error);
       toast.error("Failed to fetch churn analysis data");
@@ -235,7 +251,7 @@ export default function ChurnAnalysis() {
   // Fetch data on mount and when timeRange or customerTypeFilter changes
   useEffect(() => {
     fetchData();
-  }, [timeRange, customerTypeFilter, includeFtth]);
+  }, [timeRange, customerTypeFilter]);
 
   // Auto-reload every 2 minutes
   useEffect(() => {
@@ -243,7 +259,7 @@ export default function ChurnAnalysis() {
       fetchData();
     }, 120000); // 2 minutes
     return () => clearInterval(interval);
-  }, [timeRange, customerTypeFilter, includeFtth, activeTab, riskFilter]);
+  }, [timeRange, customerTypeFilter, activeTab, riskFilter]);
 
   // Persist activeTab and riskFilter in localStorage
   useEffect(() => {
@@ -257,15 +273,29 @@ export default function ChurnAnalysis() {
     }
   }, [riskFilter]);
 
-  useEffect(() => {
-    localStorage.setItem("churn_includeFtth", includeFtth ? "1" : "0");
-    if (!includeFtth && activeTab === "ftth-downtime") {
-      setActiveTab("downtime");
-    }
-  }, [includeFtth, activeTab]);
-
   // Navigate to customer view
-  const handleViewCustomer = (customer: any) => {
+  const handleViewCustomer = async (customer: any) => {
+    // L2VPN churn records identify a circuit by virtualCircuitId, not a
+    // single customerinfos-style row — ViewL2VPNCircuit.tsx needs the full
+    // computed circuit (hops/path) in router state, which this flattened
+    // history record doesn't carry. Resolve it via the vcid first, then
+    // deep-link straight to the detail page like every other type; only
+    // fall back to the L2VPN Circuits list (pre-filled search) if the
+    // circuit can't be found any more (e.g. torn down/reconfigured since
+    // this churn record was logged).
+    if (customer.customerType === "L2VPN") {
+      try {
+        const res = await axios.get(
+          `${PRODUCTION_URL}/l2vpncircuits/by-vcid/${encodeURIComponent(customer.interface)}`
+        );
+        navigate("/view-l2vpn-circuit", { state: { circuit: res.data.circuit } });
+      } catch (error) {
+        console.error("Error resolving L2VPN circuit for churn record:", error);
+        navigate("/l2vpn-circuits", { state: { search: customer.interface } });
+      }
+      return;
+    }
+
     const routes: Record<string, string> = {
       DIA: "/viewcustomer",
       IPT: "/view-ipt-customer",
@@ -388,7 +418,7 @@ export default function ChurnAnalysis() {
 
     const rows = data.map((c) => [
       c.customerName || "",
-      c.interface || "",
+      c.ip || "",
       c.cid || "",
       c.nbr || "",
       c.downSince ? new Date(c.downSince).toLocaleString() : "Unknown",
@@ -650,9 +680,8 @@ export default function ChurnAnalysis() {
     );
   };
 
-  const tabsClassName = includeFtth
-    ? "grid w-full grid-cols-5 lg:w-[650px]"
-    : "grid w-full grid-cols-4 lg:w-[520px]";
+  const openIncidentsCount = fiberCutIncidents.filter((i) => i.status === "open").length;
+  const tabsClassName = "grid w-full grid-cols-6 lg:w-[780px]";
 
   return (
     <div className="p-6 space-y-6">
@@ -695,13 +724,9 @@ export default function ChurnAnalysis() {
               <SelectItem value="SHARED">Shared</SelectItem>
               <SelectItem value="L3VPN">L3VPN</SelectItem>
               <SelectItem value="FTTH">FTTH</SelectItem>
+              <SelectItem value="L2VPN">L2VPN</SelectItem>
             </SelectContent>
           </Select>
-
-          <div className="flex items-center gap-2 rounded-md border border-border/50 px-3 py-2">
-            <Switch checked={includeFtth} onCheckedChange={setIncludeFtth} />
-            <span className="text-xs text-muted-foreground">Include FTTH</span>
-          </div>
 
           {/* Global search across churn data */}
           <div className="relative w-full sm:w-64">
@@ -745,10 +770,16 @@ export default function ChurnAnalysis() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="unstable">At Risk</TabsTrigger>
           <TabsTrigger value="downtime">Extended Down</TabsTrigger>
-          {includeFtth && (
-            <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
-          )}
+          <TabsTrigger value="ftth-downtime">FTTH Down</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
+          <TabsTrigger value="incidents" className="gap-1.5">
+            Outage Cuts
+            {openIncidentsCount > 0 && (
+              <Badge className="h-4 px-1.5 text-[10px] bg-red-500/20 text-red-400 border-red-500/30">
+                {openIncidentsCount}
+              </Badge>
+            )}
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -1142,8 +1173,7 @@ export default function ChurnAnalysis() {
         </TabsContent>
 
         {/* FTTH Extended Downtime Tab */}
-        {includeFtth && (
-          <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
+        <TabsContent value="ftth-downtime" className="space-y-6 mt-6">
             <Card className="border-border/50">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -1232,7 +1262,7 @@ export default function ChurnAnalysis() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="font-mono text-sm text-teal-400">{customer.interface || "-"}</TableCell>
+                          <TableCell className="font-mono text-sm text-teal-400">{customer.ip || "-"}</TableCell>
                           <TableCell className="text-sm">{customer.cid || "-"}</TableCell>
                           <TableCell className="text-sm">{customer.nbr || "-"}</TableCell>
                           <TableCell className="text-sm">
@@ -1272,7 +1302,6 @@ export default function ChurnAnalysis() {
             </CardContent>
             </Card>
           </TabsContent>
-        )}
 
         {/* History Tab */}
         <TabsContent value="history" className="space-y-6 mt-6">
@@ -1371,6 +1400,75 @@ export default function ChurnAnalysis() {
                   onPageChange={setHistoryPage}
                 />
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Fiber Cut Incidents Tab */}
+        <TabsContent value="incidents" className="space-y-6 mt-6">
+          <Card className="border-border/50">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Cable className="h-5 w-5 text-red-400" />
+                    Fiber Cut / Mass Outage Incidents
+                  </CardTitle>
+                  <CardDescription>
+                    10+ customers down within 5 minutes are grouped and monitored until fully restored
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigate("/outage-incidents")}>
+                  Open Full Monitor
+                  <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {fiberCutIncidents.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No fiber cut incidents detected
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {fiberCutIncidents.map((incident) => (
+                    <div
+                      key={incident.id}
+                      className="flex items-center justify-between p-3 bg-muted/30 rounded-lg cursor-pointer hover:bg-muted/50"
+                      onClick={() => navigate("/outage-incidents")}
+                    >
+                      <div className="flex items-center gap-3">
+                        {incident.scope === "NBR" ? (
+                          <MapPin className="h-4 w-4 text-yellow-400" />
+                        ) : (
+                          <Globe className="h-4 w-4 text-purple-400" />
+                        )}
+                        <div>
+                          <p className="font-medium">{incident.nbr || "Network-wide"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {incident.customerCount} impacted &middot; {incident.restoredCount} restored &middot;{" "}
+                            {incident.stillDownCount} still down
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-sm text-muted-foreground">{incident.durationFormatted}</span>
+                        {incident.status === "open" && (
+                          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 animate-pulse">
+                            ONGOING
+                          </Badge>
+                        )}
+                        {incident.status === "resolved" && (
+                          <Badge className="bg-green-500/20 text-green-400 border-green-500/30">RESOLVED</Badge>
+                        )}
+                        {incident.status === "closed" && (
+                          <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">CLOSED</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

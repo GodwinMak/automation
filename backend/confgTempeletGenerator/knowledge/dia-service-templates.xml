@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos DIA (Dedicated Internet Access) Service Knowledge Base
+
+  Extracted from backend/confgTempeletGenerator/diaNoTagGenerator.js and
+  diaWithTagGenerator.js. Covers customer handoffs that are routed
+  (customer WAN IP, policer, BGP route-filter) as opposed to the pure-L2
+  GPON service — see the separate gpon-over-enterprise-templates.xml for
+  that service type, which is NOT a DIA variant and does not share this
+  file's routed-IP / policer / route-filter shape.
+-->
+<junosServiceKnowledgeBase version="1.1" source="backend/confgTempeletGenerator" familyOf="dia">
+
+  <!-- ============================================================ -->
+  <!-- Conventions shared by both DIA variants                       -->
+  <!-- ============================================================ -->
+  <sharedConventions>
+
+    <sshPushWorkflow>
+      <description>
+        Every generator pushes config over an interactive SSH shell (ssh2 Client),
+        not NETCONF. The same sequence is used by both DIA generators (and by GPON —
+        see the sibling knowledge file).
+      </description>
+      <step order="1" command="configure private">Enter a private candidate config session.</step>
+      <step order="2">Write each generated "set ..." command line-by-line to the shell stream.</step>
+      <step order="3" command="commit check">Validate the candidate config without committing.</step>
+      <step order="4" trigger="stdout contains 'configuration check succeeds'" command="commit and-quit">
+        Commit only after commit check succeeds; exits config mode afterward.
+      </step>
+      <errorTrigger textContains="error:|syntax error">
+        Any of these substrings in accumulated stdout aborts the push and rejects the promise.
+      </errorTrigger>
+      <notes>
+        - sshConfig is always { username, password } spread into the ssh2 .connect() call alongside host.
+        - Devices are configured sequentially, never in parallel, so a failure on an earlier device
+          (Metro switch) stops before touching downstream PE/BNG devices.
+      </notes>
+    </sshPushWorkflow>
+
+    <circuitIdConvention id="processCid">
+      <description>
+        Customer Circuit ID (CID) is normalized into a Junos virtual-circuit-id (vcId) used on both
+        ends of the l2circuit pseudowire, and into a human-readable CID used inside interface
+        description tags. Identical logic in both DIA generators.
+      </description>
+      <rule>
+        <input>Any CID string; non-digit characters are stripped first.</input>
+        <case when="digits already start with '255'">
+          vcId = digits as-is; cidForDescription = "LTZ" + digits with leading "255" removed
+        </case>
+        <case when="digits do not start with '255'">
+          vcId = "255" + digits; cidForDescription = "LTZ" + digits
+        </case>
+      </rule>
+      <example cid="2551800766" vcId="2551800766" cidForDescription="LTZ1800766"/>
+      <example cid="1800766" vcId="2551800766" cidForDescription="LTZ1800766"/>
+    </circuitIdConvention>
+
+    <peIdentifierConvention id="extractPeIdentifier">
+      <description>
+        Shortens a full device name to its first two dash-separated tokens for use inside neighbor
+        ("nbr=") description tags, so descriptions stay stable even if a site suffix changes.
+      </description>
+      <example input="LTZ-BNG02-TIG-DAR" output="LTZ-BNG02"/>
+      <example input="LTZ-PE1-RAH" output="LTZ-PE1"/>
+      <fallback>If the name has fewer than 2 dash-separated parts, return it unchanged.</fallback>
+    </peIdentifierConvention>
+
+    <networkAddressConvention id="getNetworkAddress">
+      <description>
+        Converts a WAN gateway IP with CIDR into its network address, for use in
+        "route-filter ... exact" policy terms (Junos route filters must match the network, not the host).
+      </description>
+      <example input="154.72.90.49/30" output="154.72.90.48/30"/>
+      <usedBy>diaNoTagGenerator, diaWithTagGenerator (PE/BNG buildPeCommands)</usedBy>
+    </networkAddressConvention>
+
+    <descriptionTagFormat>
+      <description>
+        Interface unit descriptions embed a brace-delimited metadata tag consumed by other tooling
+        (monitoring, inventory) elsewhere in this codebase.
+      </description>
+      <pattern>{cat=&lt;SERVICE_CATEGORY&gt;|nbr=&lt;peer-identifier&gt;|Customer=&lt;name&gt;|cid=&lt;cidForDescription&gt;|Mbps=&lt;mbps&gt;}</pattern>
+      <example>{cat=DIA|nbr=LTZ-PE1|Customer=Acme Ltd|cid=LTZ1800766|Mbps=100}</example>
+    </descriptionTagFormat>
+
+    <l2circuitPattern>
+      <description>
+        Both DIA services are delivered as an MPLS L2 circuit (pseudowire) between the Metro switch
+        and a PE/BNG, configured symmetrically on both ends via `set protocols l2circuit neighbor
+        &lt;peer-ip&gt; interface &lt;local-intf&gt; ...`. Common leaf statements: virtual-circuit-id,
+        control-word, mtu, pseudowire-status-tlv. encapsulation-type and no-vlan-id-validate are added
+        only on the With-Tag variant, since its local l2circuit endpoint carries an 802.1Q tag.
+      </description>
+    </l2circuitPattern>
+
+    <redundancyPattern>
+      <description>
+        Both services accept an array of 2 PE/BNG devices ([primary, backup]) — the FIRST array
+        element is always primary. Validate `peDevices.length >= 2` before building commands. In both
+        DIA variants, the `backup-neighbor` statement is configured on the METRO side of the l2circuit
+        (pointing at the backup PE/BNG); the PE/BNG side never carries backup-neighbor.
+      </description>
+    </redundancyPattern>
+
+  </sharedConventions>
+
+  <!-- ============================================================ -->
+  <!-- Service: DIA — No VLAN tag                                    -->
+  <!-- ============================================================ -->
+  <serviceType id="dia-no-tag" name="DIA No Tag" sourceFile="diaNoTagGenerator.js">
+    <description>
+      Untagged dedicated internet access circuit. Customer hands off untagged Ethernet at a dedicated
+      Metro switch port, which is transported via l2circuit to a dedicated routed PE/BNG interface
+      carrying the customer's WAN IP. No port-sharing concept exists here — every customer gets a
+      fully dedicated physical interface on both ends.
+    </description>
+
+    <parameters>
+      <parameter name="metroSwitch" type="object{name,host}" required="true"/>
+      <parameter name="peDevices" type="array[object{name,host}]" required="true" constraint="length &gt;= 2, [0]=primary, [1]=backup"/>
+      <parameter name="metroIntf" type="string" required="true" example="ge-0/0/5"/>
+      <parameter name="peIntf" type="string" required="true" example="ge-0/0/10"/>
+      <parameter name="anchorPoint" type="string" required="false" example="lt-0/0/0"/>
+      <parameter name="customerName" type="string" required="true"/>
+      <parameter name="cid" type="string" required="true"/>
+      <parameter name="mbps" type="string|number" required="true"/>
+      <parameter name="wanIp" type="string (ip/cidr)" required="true" example="154.72.90.49/30"/>
+      <parameter name="includeInternalSubnet" type="boolean" required="false"/>
+      <parameter name="internalSubnet" type="string" required="false" dependsOn="includeInternalSubnet"/>
+      <parameter name="internalNextHop" type="string" required="false" dependsOn="includeInternalSubnet"/>
+      <parameter name="username" type="string" required="true"/>
+      <parameter name="password" type="string" required="true"/>
+    </parameters>
+
+    <device role="metro" label="Metro Switch" builder="buildMetroCommands">
+      <commandTemplate order="1">set interfaces {intf} description "DIA: {customerName}| {cid} "</commandTemplate>
+      <commandTemplate order="2">set interfaces {intf} speed auto</commandTemplate>
+      <commandTemplate order="3">set interfaces {intf} mtu 9000</commandTemplate>
+      <commandTemplate order="4">set interfaces {intf} encapsulation ethernet-ccc</commandTemplate>
+      <commandTemplate order="5">set interfaces {intf} gigether-options auto-negotiation</commandTemplate>
+      <commandTemplate order="6">set interfaces {intf} unit 0 description "{cat=DIA|nbr={nbrDescription}|Customer={customerName}|cid={cidForDescription}|Mbps={mbps}}"</commandTemplate>
+      <commandTemplate order="7">set interfaces {intf} unit 0 statistics</commandTemplate>
+      <commandTemplate order="8">set interfaces {intf} unit 0 family ccc</commandTemplate>
+      <commandTemplate order="9">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.0 virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="10">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.0 control-word</commandTemplate>
+      <commandTemplate order="11">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.0 mtu 1500</commandTemplate>
+      <commandTemplate order="12">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.0 pseudowire-status-tlv</commandTemplate>
+      <commandTemplate order="13" conditional="backupPeIp present">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.0 backup-neighbor {backupPeIp} virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="14" conditional="includeInternalSubnet &amp;&amp; internalSubnet &amp;&amp; internalNextHop">set routing-options static route {internalSubnet} next-hop {internalNextHop}</commandTemplate>
+      <note>nbrDescription = extractPeIdentifier(primaryPeName).</note>
+    </device>
+
+    <device role="pe-bng" label="PE/BNG" builder="buildPeCommands" note="Same command builder invoked once per device (both primary and backup receive identical config).">
+      <commandTemplate order="1">set interfaces {peIntf} anchor-point {anchorPoint}</commandTemplate>
+      <commandTemplate order="2">set interfaces {peIntf} unit 0 encapsulation ethernet-ccc</commandTemplate>
+      <commandTemplate order="3">set interfaces {peIntf} unit 1 description "{cat=DIA|nbr={metroName}|Customer={customerName}|cid={cidForDescription}|Mbps={mbps}}"</commandTemplate>
+      <commandTemplate order="4">set interfaces {peIntf} unit 1 layer2-policer input-policer {mbps}-MBPS-POLICER</commandTemplate>
+      <commandTemplate order="5">set interfaces {peIntf} unit 1 layer2-policer output-policer {mbps}-MBPS-POLICER</commandTemplate>
+      <commandTemplate order="6">set interfaces {peIntf} unit 1 family inet address {wanIp}</commandTemplate>
+      <commandTemplate order="7">set interfaces {peIntf} unit 1 family inet6 dad-disable</commandTemplate>
+      <commandTemplate order="8">set protocols l2circuit neighbor {metroIp} interface {peIntf}.0 virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="9">set protocols l2circuit neighbor {metroIp} interface {peIntf}.0 control-word</commandTemplate>
+      <commandTemplate order="10">set protocols l2circuit neighbor {metroIp} interface {peIntf}.0 mtu 1500</commandTemplate>
+      <commandTemplate order="11">set protocols l2circuit neighbor {metroIp} interface {peIntf}.0 pseudowire-status-tlv</commandTemplate>
+      <commandTemplate order="12">set policy-options policy-statement RR-BGP-out term CONNECTED from route-filter {networkAddress} exact</commandTemplate>
+      <note>networkAddress = getNetworkAddress(wanIp). Unit 1 (not 0) carries the routed customer traffic; unit 0 is the raw ccc encapsulation used only for the l2circuit endpoint.</note>
+    </device>
+
+    <pushOrder>
+      <step order="1">Metro Switch</step>
+      <step order="2">Primary PE/BNG</step>
+      <step order="3">Backup PE/BNG</step>
+    </pushOrder>
+  </serviceType>
+
+  <!-- ============================================================ -->
+  <!-- Service: DIA — With VLAN tag                                  -->
+  <!-- ============================================================ -->
+  <serviceType id="dia-with-tag" name="DIA With Tag" sourceFile="diaWithTagGenerator.js">
+    <description>
+      Same intent as DIA No Tag, but the customer handoff is 802.1Q tagged and the PE/BNG side uses a
+      shared "ps" (pseudo-interface / logical bundle) rather than a dedicated physical interface, so
+      multiple VLAN customers can share one physical port on both ends. Because of this, the Metro
+      switch side has TWO distinct command variants depending on whether the physical port is being
+      used for the first time or is already shared with another customer — see
+      &lt;portVariants&gt; below. The PE/BNG side has no such split; it is identical regardless of
+      port sharing.
+    </description>
+
+    <differencesFrom serviceType="dia-no-tag">
+      <difference area="metro interface">flexible-vlan-tagging + encapsulation flexible-ethernet-services instead of encapsulation ethernet-ccc directly on the interface.</difference>
+      <difference area="metro unit">Unit uses vlan-id {vlanId} and encapsulation vlan-ccc (802.1Q-tagged ccc) instead of plain unit 0 family ccc.</difference>
+      <difference area="metro l2circuit mtu">1800 instead of 1500 (extra headroom for the VLAN tag).</difference>
+      <difference area="metro backup-neighbor">Always added (not conditional) — DIA With Tag always expects 2 PE/BNG devices.</difference>
+      <difference area="pe interface">Uses ps{psUnit} (logical/pseudo interface), not a dedicated physical peIntf. flexible-vlan-tagging is set on it.</difference>
+      <difference area="pe unit 0">encapsulation ethernet-ccc — used purely as the l2circuit endpoint (mirrors Metro's approach), separate from the numbered VLAN unit.</difference>
+      <difference area="pe numbered unit">unit {psUnit} carries vlan-id {vlanId}, the layer2-policer pair, and family inet address — the routed/policed customer unit.</difference>
+      <difference area="pe l2circuit">Adds encapsulation-type ethernet-vlan and no-vlan-id-validate (required whenever the local l2circuit endpoint interface is VLAN-tagged).</difference>
+    </differencesFrom>
+
+    <parameters extendsServiceType="dia-no-tag">
+      <parameter name="psUnit" type="string" required="true" example="1853" note="Used both as the Metro VLAN unit number and the PE ps-interface number/unit number."/>
+      <parameter name="vlanId" type="string" required="true" example="990"/>
+      <parameter name="sharedPort" type="boolean" required="false" note="Selects which Metro command variant applies — see portVariants."/>
+      <parameter name="peIntf" removed="true" note="Replaced by ps{psUnit}, derived rather than passed in directly."/>
+    </parameters>
+
+    <!-- ======================================================== -->
+    <!-- The two Metro-side port variants                          -->
+    <!-- ======================================================== -->
+    <portVariants builder="buildMetroCommands" selector="config.sharedPort">
+      <description>
+        A single physical Metro interface can host multiple VLAN-tagged customers (different psUnit /
+        vlanId per customer). The interface-level statements only need to be set ONCE per physical
+        port; re-issuing them for every customer is unnecessary and, more importantly, would overwrite
+        the description on an already-configured shared port. `sharedPort` tells the generator which
+        of the two variants to emit.
+      </description>
+
+      <variant id="dedicated-port" when="sharedPort is false or omitted" label="First customer on this physical port">
+        <description>
+          Full sequence: physical interface-level commands are issued first, then the per-customer
+          VLAN unit and its l2circuit. Use this the first time a given Metro physical interface is
+          used for DIA With Tag.
+        </description>
+        <commandTemplate order="1">set interfaces {intf} description "&lt;&lt; {customerName} &gt;&gt;"</commandTemplate>
+        <commandTemplate order="2">set interfaces {intf} flexible-vlan-tagging</commandTemplate>
+        <commandTemplate order="3">set interfaces {intf} speed auto</commandTemplate>
+        <commandTemplate order="4">set interfaces {intf} mtu 9000</commandTemplate>
+        <commandTemplate order="5">set interfaces {intf} encapsulation flexible-ethernet-services</commandTemplate>
+        <commandTemplate order="6">set interfaces {intf} gigether-options auto-negotiation</commandTemplate>
+        <commandTemplate order="7">set interfaces {intf} unit {psUnit} description "{cat=DIA|nbr={nbrDescription} ps{psUnit}|Customer={customerName}|cid={cidForDescription}|Mbps={mbps}}"</commandTemplate>
+        <commandTemplate order="8">set interfaces {intf} unit {psUnit} encapsulation vlan-ccc</commandTemplate>
+        <commandTemplate order="9">set interfaces {intf} unit {psUnit} vlan-id {vlanId}</commandTemplate>
+        <commandTemplate order="10">set interfaces {intf} unit {psUnit} statistics</commandTemplate>
+        <commandTemplate order="11">set interfaces {intf} unit {psUnit} family ccc</commandTemplate>
+        <commandTemplate order="12">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} virtual-circuit-id {vcId}</commandTemplate>
+        <commandTemplate order="13">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} control-word</commandTemplate>
+        <commandTemplate order="14">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} mtu 1800</commandTemplate>
+        <commandTemplate order="15">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} pseudowire-status-tlv</commandTemplate>
+        <commandTemplate order="16">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} backup-neighbor {backupPeIp} virtual-circuit-id {vcId}</commandTemplate>
+      </variant>
+
+      <variant id="shared-port" when="sharedPort is true" label="Additional customer on an already-configured physical port">
+        <description>
+          Short sequence: the 6 physical interface-level commands (description, flexible-vlan-tagging,
+          speed, mtu, encapsulation, gigether-options) are SKIPPED entirely because a prior customer's
+          VLAN unit already configured them on this port. Only the new customer's VLAN unit and its
+          l2circuit are added — commands 7-16 from the dedicated-port variant, unchanged.
+        </description>
+        <commandTemplate order="1">set interfaces {intf} unit {psUnit} description "{cat=DIA|nbr={nbrDescription} ps{psUnit}|Customer={customerName}|cid={cidForDescription}|Mbps={mbps}}"</commandTemplate>
+        <commandTemplate order="2">set interfaces {intf} unit {psUnit} encapsulation vlan-ccc</commandTemplate>
+        <commandTemplate order="3">set interfaces {intf} unit {psUnit} vlan-id {vlanId}</commandTemplate>
+        <commandTemplate order="4">set interfaces {intf} unit {psUnit} statistics</commandTemplate>
+        <commandTemplate order="5">set interfaces {intf} unit {psUnit} family ccc</commandTemplate>
+        <commandTemplate order="6">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} virtual-circuit-id {vcId}</commandTemplate>
+        <commandTemplate order="7">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} control-word</commandTemplate>
+        <commandTemplate order="8">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} mtu 1800</commandTemplate>
+        <commandTemplate order="9">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} pseudowire-status-tlv</commandTemplate>
+        <commandTemplate order="10">set protocols l2circuit neighbor {primaryPeIp} interface {intf}.{psUnit} backup-neighbor {backupPeIp} virtual-circuit-id {vcId}</commandTemplate>
+        <caution>
+          Caller is responsible for knowing that the physical port was already configured (e.g. by
+          tracking prior provisioning in the inventory/database) — the generator itself does not probe
+          the device to detect an existing configuration. Passing sharedPort=true for a port that was
+          never configured will leave it without flexible-vlan-tagging/encapsulation and the commit
+          will likely fail or the unit will be non-functional.
+        </caution>
+      </variant>
+    </portVariants>
+
+    <device role="pe-bng" label="PE/BNG" builder="buildPeCommands" note="Same command builder invoked once per device (both primary and backup receive identical config). No shared-port concept on this side — ps{psUnit} is always dedicated per customer.">
+      <commandTemplate order="1">set interfaces ps{psUnit} anchor-point {anchorPoint}</commandTemplate>
+      <commandTemplate order="2">set interfaces ps{psUnit} flexible-vlan-tagging</commandTemplate>
+      <commandTemplate order="3">set interfaces ps{psUnit} mtu 9000</commandTemplate>
+      <commandTemplate order="4">set interfaces ps{psUnit} unit 0 encapsulation ethernet-ccc</commandTemplate>
+      <commandTemplate order="5">set interfaces ps{psUnit} unit {psUnit} description "{cat=DIA|nbr={metroIdentifier} {metroIntf}|Customer={customerName}|cid={cidForDescription}|Mbps={mbps}}"</commandTemplate>
+      <commandTemplate order="6">set interfaces ps{psUnit} unit {psUnit} vlan-id {vlanId}</commandTemplate>
+      <commandTemplate order="7">set interfaces ps{psUnit} unit {psUnit} layer2-policer input-policer {mbps}-MBPS-POLICER</commandTemplate>
+      <commandTemplate order="8">set interfaces ps{psUnit} unit {psUnit} layer2-policer output-policer {mbps}-MBPS-POLICER</commandTemplate>
+      <commandTemplate order="9">set interfaces ps{psUnit} unit {psUnit} family inet address {wanIp}</commandTemplate>
+      <commandTemplate order="10">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="11">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 control-word</commandTemplate>
+      <commandTemplate order="12">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 mtu 1800</commandTemplate>
+      <commandTemplate order="13">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 encapsulation-type ethernet-vlan</commandTemplate>
+      <commandTemplate order="14">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 no-vlan-id-validate</commandTemplate>
+      <commandTemplate order="15">set protocols l2circuit neighbor {metroIp} interface ps{psUnit}.0 pseudowire-status-tlv</commandTemplate>
+      <commandTemplate order="16">set policy-options policy-statement RR-BGP-out term CONNECTED from route-filter {networkAddress} exact</commandTemplate>
+      <commandTemplate order="17" conditional="includeInternalSubnet &amp;&amp; internalSubnet &amp;&amp; internalNextHop">set routing-options static route {internalSubnet} next-hop {internalNextHop}</commandTemplate>
+      <commandTemplate order="18" conditional="includeInternalSubnet &amp;&amp; internalSubnet &amp;&amp; internalNextHop">set policy-options policy-statement RR-BGP-out term STATIC from route-filter {internalSubnet} exact</commandTemplate>
+      <note>metroIdentifier = extractPeIdentifier(metroSwitch.name). PE side does NOT carry backup-neighbor (that lives on the Metro side).</note>
+    </device>
+
+    <pushOrder>
+      <step order="1">Metro Switch (dedicated-port or shared-port variant per sharedPort flag)</step>
+      <step order="2">Primary PE/BNG</step>
+      <step order="3">Backup PE/BNG</step>
+    </pushOrder>
+  </serviceType>
+
+  <!-- ============================================================ -->
+  <!-- Cross-service comparison, for quick reference when authoring  -->
+  <!-- a new DIA-family service generator                            -->
+  <!-- ============================================================ -->
+  <comparisonMatrix>
+    <axis name="customer-facing VLAN tagging">
+      <value serviceType="dia-no-tag">none (untagged ethernet-ccc)</value>
+      <value serviceType="dia-with-tag">single tag, vlan-ccc on both ends</value>
+    </axis>
+    <axis name="l2circuit MTU">
+      <value serviceType="dia-no-tag">1500</value>
+      <value serviceType="dia-with-tag">1800</value>
+    </axis>
+    <axis name="port sharing">
+      <value serviceType="dia-no-tag">not applicable — always a dedicated physical port</value>
+      <value serviceType="dia-with-tag">Metro physical port may be shared across customers; see portVariants (dedicated-port vs shared-port)</value>
+    </axis>
+    <axis name="backup-neighbor placement">
+      <value serviceType="dia-no-tag">Metro side, conditional on backupPeIp being present</value>
+      <value serviceType="dia-with-tag">Metro side, always added</value>
+    </axis>
+  </comparisonMatrix>
+
+  <newServiceChecklist>
+    <item>Decide whether the customer handoff is routed (family inet + policer + BGP route-filter, as both DIA variants are) or pure L2 — see gpon-over-enterprise-templates.xml for the pure-L2 pattern.</item>
+    <item>Decide whether the access-facing physical port can be shared across customers. If yes, split the interface-level commands from the per-customer unit/l2circuit commands into two variants like dia-with-tag's portVariants, and add a boolean flag (sharedPort) the caller must set correctly.</item>
+    <item>Reuse processCid/extractPeIdentifier/getNetworkAddress helpers verbatim rather than re-deriving the logic.</item>
+    <item>Keep the brace-delimited description tag flavor for DIA-family services so downstream tooling parsing it does not need updating.</item>
+    <item>Follow the same SSH push workflow (configure private → commit check → commit and-quit) and expose both a push* (executes) and preview* (dry run, returns commands without connecting) function, matching the existing module.exports shape.</item>
+  </newServiceChecklist>
+
+</junosServiceKnowledgeBase>

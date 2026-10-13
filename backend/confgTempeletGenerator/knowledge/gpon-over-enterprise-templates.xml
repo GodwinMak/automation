@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos GPON over Enterprise Service Knowledge Base
+
+  Extracted from backend/confgTempeletGenerator/gponOverEnterpriseGenerator.js.
+  This is a DIFFERENT service family from DIA — see the separate
+  dia-service-templates.xml for DIA No Tag / DIA With Tag. GPON over
+  Enterprise is pure L2 (no routed customer IP, no policer, no BGP
+  route-filter) and uses subscriber-management-style dynamic VLAN ranges
+  on the BNG side rather than a single static VLAN unit.
+-->
+<junosServiceKnowledgeBase version="1.1" source="backend/confgTempeletGenerator" familyOf="gpon">
+
+  <sharedConventions>
+
+    <sshPushWorkflow>
+      <description>
+        Pushes config over an interactive SSH shell (ssh2 Client), not NETCONF — same mechanism as
+        the DIA generators (see dia-service-templates.xml).
+      </description>
+      <step order="1" command="configure private">Enter a private candidate config session.</step>
+      <step order="2">Write each generated "set ..." command line-by-line to the shell stream.</step>
+      <step order="3" command="commit check">Validate the candidate config without committing.</step>
+      <step order="4" trigger="stdout contains 'configuration check succeeds'" command="commit and-quit">
+        Commit only after commit check succeeds; exits config mode afterward.
+      </step>
+      <errorTrigger textContains="error:|syntax error">
+        Any of these substrings in accumulated stdout aborts the push and rejects the promise.
+      </errorTrigger>
+    </sshPushWorkflow>
+
+    <circuitIdConvention id="processCid">
+      <description>
+        Only derives the l2circuit virtual-circuit-id (vcId) — GPON has NO description-flavored CID
+        transform (contrast with DIA's cidForDescription/"LTZ" logic). The customer's account number
+        (e.g. "LHTZ-6779") is an entirely independent input field, not derived from the CID.
+      </description>
+      <rule>
+        <input>Any CID string; non-digit characters are stripped first.</input>
+        <case when="digits already start with '255'">vcId = digits as-is</case>
+        <case when="digits do not start with '255'">vcId = "255" + digits</case>
+      </rule>
+      <example cid="255000232" vcId="255000232"/>
+      <example cid="000232" vcId="255000232"/>
+    </circuitIdConvention>
+
+    <descriptionTagFormat>
+      <description>
+        Interface descriptions use an angle-bracket flavor, distinct from DIA's brace-delimited flavor.
+        Do not mix the two within this service.
+      </description>
+      <unitTagPattern>&lt;&lt; cat=&lt;SERVICE_CATEGORY&gt;|nbr=&lt;peer-name peer-intf&gt;| &lt;accountName&gt; | &lt;accountNumber&gt;&gt;&gt;</unitTagPattern>
+      <example>&lt;&lt; cat=GPON|nbr=LTZ-ACC1-ITO ge-0/0/27| LYNY SUPPLY AND SERVICES | LHTZ-6779&gt;&gt;</example>
+      <interfaceTagPattern>&lt;&lt; &lt;accountName&gt; &gt;&gt;</interfaceTagPattern>
+      <note>The parent ps/physical interface gets the simple interfaceTagPattern; only the unit gets the full metadata tag.</note>
+    </descriptionTagFormat>
+
+    <l2circuitPattern>
+      <description>
+        Delivered as an MPLS L2 circuit (pseudowire) between the Access Switch and a BNG, configured
+        symmetrically via `set protocols l2circuit neighbor &lt;peer-ip&gt; interface
+        &lt;local-intf&gt; ...`. Common leaf statements: virtual-circuit-id, control-word, mtu,
+        pseudowire-status-tlv. Unlike DIA With Tag, the BNG-facing leg of the pseudowire is untagged,
+        so encapsulation-type there is "ethernet" (not "ethernet-vlan") and appears only on the
+        Access Switch end.
+      </description>
+    </l2circuitPattern>
+
+    <redundancyPattern>
+      <description>
+        bngDevices is an array of 2 ([primary, backup]) — validate length &gt;= 2. Unlike DIA (where
+        backup-neighbor lives on the Metro/access side pointing toward the PE/BNG — same placement
+        concept here), GPON's `backup-neighbor` is configured on the ACCESS SWITCH side only, pointing
+        at the backup BNG. The BNG side's l2circuit always targets the single Access Switch and never
+        carries backup-neighbor itself, since each BNG only needs one path to that access switch.
+      </description>
+    </redundancyPattern>
+
+  </sharedConventions>
+
+  <!-- ============================================================ -->
+  <!-- Service: GPON over Enterprise                                 -->
+  <!-- ============================================================ -->
+  <serviceType id="gpon-over-enterprise" name="GPON over Enterprise" sourceFile="gponOverEnterpriseGenerator.js">
+    <description>
+      Enterprise circuit delivered over a shared GPON access network. An Access Switch (physical port,
+      one VLAN unit per customer) is transported via l2circuit to a BNG's ps interface, which uses
+      dynamic/auto-configured stacked VLAN ranges (subscriber-management style) rather than a single
+      static VLAN unit — so, unlike DIA With Tag's Metro side, there is no separate "shared port"
+      command variant needed here: the BNG ps interface commands are identical regardless of how many
+      customers use that BNG, because VLAN handling is delegated to the dynamic-profile/access-profile
+      subscriber logic rather than to individually-declared static units.
+    </description>
+
+    <parameters>
+      <parameter name="accessSwitch" type="object{name,host}" required="true"/>
+      <parameter name="accessIntf" type="string" required="true" example="ge-0/0/27"/>
+      <parameter name="bngDevices" type="array[object{name,host}]" required="true" constraint="length &gt;= 2, [0]=primary, [1]=backup"/>
+      <parameter name="psUnit" type="string" required="true" example="127" note="BNG ps interface number."/>
+      <parameter name="vlanId" type="string" required="true" example="101" note="Also used as the Access Switch's unit number."/>
+      <parameter name="anchorPoint" type="string" required="false" default="lt-0/0/0"/>
+      <parameter name="profilePrefix" type="string" required="true" example="RAHA" note="Expands to {profilePrefix}-GPON-VLAN-PROFILE (dynamic-profile) and {profilePrefix}-GPON (access-profile)."/>
+      <parameter name="accountName" type="string" required="true"/>
+      <parameter name="accountNumber" type="string" required="true" note="Independent input field — NOT derived from cid."/>
+      <parameter name="cid" type="string" required="true" note="Only used to derive vcId; no description-flavored transform."/>
+      <parameter name="mtu" type="string" required="false" default="1532"/>
+      <parameter name="username" type="string" required="true"/>
+      <parameter name="password" type="string" required="true"/>
+    </parameters>
+
+    <device role="bng" label="BNG (ps interface)" builder="buildBngCommands" note="Same command set pushed to BOTH primary and backup BNG. No port-sharing variant — commands are identical every time.">
+      <commandTemplate order="1">set interfaces ps{psUnit} description "&lt;&lt; {accountName} &gt;&gt;"</commandTemplate>
+      <commandTemplate order="2">set interfaces ps{psUnit} anchor-point {anchorPoint}</commandTemplate>
+      <commandTemplate order="3">set interfaces ps{psUnit} flexible-vlan-tagging</commandTemplate>
+      <commandTemplate order="4">set interfaces ps{psUnit} auto-configure stacked-vlan-ranges dynamic-profile {profilePrefix}-GPON-VLAN-PROFILE accept any</commandTemplate>
+      <commandTemplate order="5">set interfaces ps{psUnit} auto-configure stacked-vlan-ranges dynamic-profile {profilePrefix}-GPON-VLAN-PROFILE ranges any,any</commandTemplate>
+      <commandTemplate order="6">set interfaces ps{psUnit} auto-configure stacked-vlan-ranges access-profile {profilePrefix}-GPON</commandTemplate>
+      <commandTemplate order="7">set interfaces ps{psUnit} mtu {mtu}</commandTemplate>
+      <commandTemplate order="8">set interfaces ps{psUnit} unit 0 description "&lt;&lt; cat=GPON|nbr={accessSwitchName} {accessIntf}| {accountName} | {accountNumber}&gt;&gt;"</commandTemplate>
+      <commandTemplate order="9">set interfaces ps{psUnit} unit 0 encapsulation ethernet-ccc</commandTemplate>
+      <commandTemplate order="10">set protocols l2circuit neighbor {accessSwitchIp} interface ps{psUnit}.0 virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="11">set protocols l2circuit neighbor {accessSwitchIp} interface ps{psUnit}.0 control-word</commandTemplate>
+      <commandTemplate order="12">set protocols l2circuit neighbor {accessSwitchIp} interface ps{psUnit}.0 mtu {mtu}</commandTemplate>
+      <commandTemplate order="13">set protocols l2circuit neighbor {accessSwitchIp} interface ps{psUnit}.0 no-vlan-id-validate</commandTemplate>
+      <commandTemplate order="14">set protocols l2circuit neighbor {accessSwitchIp} interface ps{psUnit}.0 pseudowire-status-tlv</commandTemplate>
+      <note>
+        No backup-neighbor here — BNG's l2circuit always points at the single Access Switch;
+        redundancy is expressed on the Access Switch side instead. No encapsulation-type ethernet-vlan
+        either, since the BNG-facing leg is not itself VLAN tagged (tagging/detagging happens via the
+        dynamic-profile subscriber logic).
+      </note>
+    </device>
+
+    <device role="access-switch" label="Access Switch (physical interface)" builder="buildAccessSwitchCommands">
+      <commandTemplate order="1">set interfaces {accessIntf} description "{accountName} | {accountNumber}"</commandTemplate>
+      <commandTemplate order="2">set interfaces {accessIntf} flexible-vlan-tagging</commandTemplate>
+      <commandTemplate order="3">set interfaces {accessIntf} speed auto</commandTemplate>
+      <commandTemplate order="4">set interfaces {accessIntf} mtu 9000</commandTemplate>
+      <commandTemplate order="5">set interfaces {accessIntf} encapsulation flexible-ethernet-services</commandTemplate>
+      <commandTemplate order="6">set interfaces {accessIntf} gigether-options auto-negotiation</commandTemplate>
+      <commandTemplate order="7">set interfaces {accessIntf} unit {vlanId} description "&lt;&lt; GPON | {accountName} | {accountNumber} &gt;&gt;"</commandTemplate>
+      <commandTemplate order="8">set interfaces {accessIntf} unit {vlanId} encapsulation vlan-ccc</commandTemplate>
+      <commandTemplate order="9">set interfaces {accessIntf} unit {vlanId} vlan-id {vlanId}</commandTemplate>
+      <commandTemplate order="10">set interfaces {accessIntf} unit {vlanId} input-vlan-map push</commandTemplate>
+      <commandTemplate order="11">set interfaces {accessIntf} unit {vlanId} input-vlan-map vlan-id {vlanId}</commandTemplate>
+      <commandTemplate order="12">set interfaces {accessIntf} unit {vlanId} output-vlan-map pop</commandTemplate>
+      <commandTemplate order="13">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} virtual-circuit-id {vcId}</commandTemplate>
+      <commandTemplate order="14">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} control-word</commandTemplate>
+      <commandTemplate order="15">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} mtu {mtu}</commandTemplate>
+      <commandTemplate order="16">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} encapsulation-type ethernet</commandTemplate>
+      <commandTemplate order="17">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} pseudowire-status-tlv</commandTemplate>
+      <commandTemplate order="18">set protocols l2circuit neighbor {primaryBngIp} interface {accessIntf}.{vlanId} backup-neighbor {backupBngIp} virtual-circuit-id {vcId}</commandTemplate>
+      <note>
+        input-vlan-map push / output-vlan-map pop performs VLAN tag imposition/removal at the access
+        edge (push on ingress toward the core, pop on egress toward the customer) — this is how a
+        single-tagged customer port maps onto the untagged ethernet-ccc pseudowire on the BNG side.
+        encapsulation-type here is "ethernet" (untagged far-end), contrasting with DIA With Tag's
+        "ethernet-vlan". This device builder currently issues the physical interface-level commands
+        (1-6) every time, with no shared-port variant like dia-with-tag's Metro switch — each
+        Access Switch port in this generator is assumed dedicated to one customer's VLAN unit
+        namespace at a time. If multi-customer sharing of one Access Switch port is later needed,
+        model it the same way dia-with-tag splits dedicated-port vs shared-port commands.
+      </note>
+    </device>
+
+    <pushOrder>
+      <step order="1">Access Switch</step>
+      <step order="2">Primary BNG</step>
+      <step order="3">Backup BNG</step>
+    </pushOrder>
+  </serviceType>
+
+  <relationToDiaFamily>
+    <description>
+      See dia-service-templates.xml for the DIA No Tag / DIA With Tag services. Key structural
+      differences from that family:
+    </description>
+    <axis name="routed customer IP / policer / BGP route-filter">GPON has none — pure L2, no family inet anywhere.</axis>
+    <axis name="CID → description transform">GPON has none; uses an independent accountNumber field instead of DIA's LTZ-prefixed cidForDescription.</axis>
+    <axis name="description tag flavor">GPON uses angle-bracket &lt;&lt; ... &gt;&gt; tags; DIA uses brace-delimited {...} tags.</axis>
+    <axis name="backup-neighbor placement">GPON places it on the Access Switch (equivalent role to DIA's Metro switch) — same conceptual side as DIA, but note GPON's BNG-facing leg has no VLAN tagging at all, whereas DIA With Tag's PE-facing leg is tagged.</axis>
+    <axis name="access-side VLAN handling">GPON's BNG side uses dynamic/subscriber auto-configure stacked-vlan-ranges instead of a single static VLAN unit — no equivalent in either DIA variant.</axis>
+  </relationToDiaFamily>
+
+  <newServiceChecklist>
+    <item>If the new service is pure L2 (no customer-routed IP), follow this file's pattern rather than DIA's routed pattern.</item>
+    <item>If BNG/PE-side VLAN assignment should be dynamic per-subscriber rather than a static per-customer unit, model it on the auto-configure stacked-vlan-ranges + dynamic-profile/access-profile pattern here.</item>
+    <item>Decide independently whether the CID needs a description-flavored transform (DIA-style) or whether a separate account-number field is more appropriate (GPON-style) — do not assume one applies to the other.</item>
+    <item>If the access-facing physical port may need to be shared across multiple customers (as dia-with-tag's Metro side can), split the physical interface-level commands from the per-customer unit/l2circuit commands the same way dia-with-tag's portVariants does — this generator does not currently do that.</item>
+    <item>Follow the same SSH push workflow (configure private → commit check → commit and-quit) and expose both a push* (executes) and preview* (dry run) function, matching the existing module.exports shape.</item>
+  </newServiceChecklist>
+
+</junosServiceKnowledgeBase>

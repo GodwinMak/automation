@@ -227,6 +227,7 @@ const ViewDiaCutomer = () => {
   };
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [isTempEditModalOpen, setIsTempEditModalOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -306,6 +307,16 @@ const ViewDiaCutomer = () => {
     upgrade_type: "upgrade",
   });
 
+  const [tempEditForm, setTempEditForm] = useState({
+    type: "temporary",
+    expiryMode: "duration",
+    duration: "1d",
+    expires_at: "",
+    new_upmbps: "",
+    new_downmbps: "",
+    password: "",
+  });
+
   const openUpgradeFlow = () => {
     setSelectedCustomer(customerInfo.customer);
     setIsPasswordModalOpen(true);
@@ -332,6 +343,92 @@ const ViewDiaCutomer = () => {
 
   const handleUpgradeTypeChange = (value) => {
     setFormData((prev) => ({ ...prev, upgrade_type: value }));
+  };
+
+  const openTemporaryEditFlow = () => {
+    setTempEditForm({
+      type: "temporary",
+      expiryMode: "duration",
+      duration: "1d",
+      expires_at: customer?.expires_at
+        ? new Date(customer.expires_at).toISOString().slice(0, 16)
+        : "",
+      new_upmbps: customer?.upmbps != null ? String(customer.upmbps) : "",
+      new_downmbps: customer?.downmbps != null ? String(customer.downmbps) : "",
+      password: "",
+    });
+    setIsTempEditModalOpen(true);
+  };
+
+  const handleTemporaryEdit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+    setError("");
+
+    const username = authState?.userData?.username;
+    if (!username) {
+      setError("Authentication failed: Username not found.");
+      setLoading(false);
+      return;
+    }
+
+    const nextUp = Number(tempEditForm.new_upmbps);
+    const nextDown = Number(tempEditForm.new_downmbps);
+    if (!Number.isFinite(nextUp) || !Number.isFinite(nextDown) || nextUp <= 0 || nextDown <= 0) {
+      setError("Capacity must be positive numbers.");
+      setLoading(false);
+      return;
+    }
+
+    const payload = {
+      interface: customer?.interface,
+      type: tempEditForm.type,
+      new_upmbps: nextUp,
+      new_downmbps: nextDown,
+    };
+
+    if (tempEditForm.type === "temporary") {
+      if (tempEditForm.expiryMode === "duration") {
+        if (!tempEditForm.duration?.trim()) {
+          setError("Duration is required.");
+          setLoading(false);
+          return;
+        }
+        payload.duration = tempEditForm.duration.trim();
+      } else {
+        if (!tempEditForm.expires_at) {
+          setError("End date is required.");
+          setLoading(false);
+          return;
+        }
+        payload.expires_at = new Date(tempEditForm.expires_at).toISOString();
+      }
+    }
+
+    const isCapacityChanged =
+      nextUp !== Number(customer?.upmbps || 0) || nextDown !== Number(customer?.downmbps || 0);
+    if (isCapacityChanged) {
+      if (!tempEditForm.password) {
+        setError("Password is required when changing capacity.");
+        setLoading(false);
+        return;
+      }
+      payload.username = username;
+      payload.password = tempEditForm.password;
+    }
+
+    try {
+      const response = await axios.put(`${PRODUCTION_URL}/upgrade/temporary/edit`, payload);
+      setMessage(response.data?.message || "Temporary upgrade updated successfully.");
+      setCustomer((prev) => ({ ...prev, ...response.data?.customer }));
+      setIsTempEditModalOpen(false);
+      setLoading(false);
+    } catch (err) {
+      console.error("Temporary edit error:", err);
+      setError(err.response?.data?.message || "Failed to update temporary upgrade.");
+      setLoading(false);
+    }
   };
 
   const handleUpgrade = async (e) => {
@@ -428,6 +525,7 @@ const ViewDiaCutomer = () => {
 
       // 1. LOGIN → get auth key
       const auth = localStorage.getItem("zabbixAuth");
+      console.log(auth)
 
       // 2. GET HOST ID
       const switchName = customerData.switchName;
@@ -531,6 +629,14 @@ const ViewDiaCutomer = () => {
             >
               Upgrade/Downgrade
             </Button>
+            {customer?.upgrade_type === "temporary" && (
+              <Button
+                onClick={openTemporaryEditFlow}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+              >
+                Edit Temporary
+              </Button>
+            )}
             <Button
               onClick={handleDiagnosis}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
@@ -1031,6 +1137,122 @@ const ViewDiaCutomer = () => {
             </div>
             <DialogFooter>
               <Button type="submit">Continue</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isTempEditModalOpen} onOpenChange={setIsTempEditModalOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Edit Temporary Upgrade</DialogTitle>
+            <DialogDescription>
+              Change temporary end date, capacity, or convert this customer to permanent.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleTemporaryEdit} className="grid gap-4 py-2">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Type</Label>
+              <div className="col-span-3">
+                <Select
+                  value={tempEditForm.type}
+                  onValueChange={(value) => setTempEditForm((prev) => ({ ...prev, type: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="temporary">Temporary</SelectItem>
+                    <SelectItem value="permanent">Permanent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">New Up</Label>
+              <Input
+                className="col-span-3"
+                type="number"
+                min="1"
+                value={tempEditForm.new_upmbps}
+                onChange={(e) => setTempEditForm((prev) => ({ ...prev, new_upmbps: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">New Down</Label>
+              <Input
+                className="col-span-3"
+                type="number"
+                min="1"
+                value={tempEditForm.new_downmbps}
+                onChange={(e) => setTempEditForm((prev) => ({ ...prev, new_downmbps: e.target.value }))}
+              />
+            </div>
+
+            {tempEditForm.type === "temporary" && (
+              <>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label className="text-right">End Mode</Label>
+                  <div className="col-span-3">
+                    <Select
+                      value={tempEditForm.expiryMode}
+                      onValueChange={(value) => setTempEditForm((prev) => ({ ...prev, expiryMode: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="duration">Duration</SelectItem>
+                        <SelectItem value="date">Date/Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {tempEditForm.expiryMode === "duration" ? (
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Duration</Label>
+                    <Input
+                      className="col-span-3"
+                      value={tempEditForm.duration}
+                      onChange={(e) => setTempEditForm((prev) => ({ ...prev, duration: e.target.value }))}
+                      placeholder="e.g., 12h, 3d"
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">End Date</Label>
+                    <Input
+                      className="col-span-3"
+                      type="datetime-local"
+                      value={tempEditForm.expires_at}
+                      onChange={(e) => setTempEditForm((prev) => ({ ...prev, expires_at: e.target.value }))}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Password</Label>
+              <Input
+                className="col-span-3"
+                type="password"
+                value={tempEditForm.password}
+                onChange={(e) => setTempEditForm((prev) => ({ ...prev, password: e.target.value }))}
+                placeholder="Required only if capacity changed"
+              />
+            </div>
+
+            {message && <p className="text-green-600 text-center">{message}</p>}
+            {error && <p className="text-red-600 text-center">{error}</p>}
+
+            <DialogFooter>
+              <Button type="submit" disabled={loading}>
+                {loading ? "Saving..." : "Save Changes"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

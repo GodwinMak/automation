@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Junos Circuit Incident Evidence Template
+-->
+<knowledgeTopic>
+  <topic id="circuit-evidence-template" title="Junos Circuit Incident Evidence Template" category="circuits">
+    <incident>
+      <field name="Incident ID" />
+      <field name="Date/time" />
+      <field name="Device Hostname/IP" />
+      <field name="Site/Pop" />
+      <field name="Circuit ID / VC ID" />
+      <field name="Interface Unit" />
+      <field name="Service/VLAN Tag(s)" />
+      <field name="Impact" />
+    </incident>
+
+    <physicalEvidence>
+      <commands>
+        <command>show interfaces terse &lt;interface&gt;</command>
+        <command>show interfaces &lt;interface&gt; extensive</command>
+        <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      </commands>
+      <description>Record:</description>
+      <item>Admin/Link state</item>
+      <item>Speed/Duplex settings</item>
+      <item>FEC status</item>
+      <item>Input/Output errors</item>
+      <item>CRC/FCS framing errors</item>
+      <item>Optical Tx/Rx power levels (dBm)</item>
+      <item>Carrier transitions / Flaps count</item>
+    </physicalEvidence>
+
+    <encapsulationAndServiceEvidence>
+      <commands>
+        <command>show configuration | display set | match &lt;interface&gt;</command>
+        <command>show configuration | display set | match &lt;interface&gt;.&lt;unit&gt;</command>
+      </commands>
+      <description>Record:</description>
+      <item>Encapsulation type (flexible-ethernet-services, vlan-vccv, etc.)</item>
+      <item>Inner/Outer VLAN tags</item>
+      <item>MAC learning table state</item>
+    </encapsulationAndServiceEvidence>
+    <diagnosticOamEvidence>
+      <commands>
+        <command>show arp no-resolve interface &lt;interface&gt;</command>
+        <command>ping &lt;destination&gt; count 5</command>
+        <command>traceroute &lt;destination&gt;</command>
+      </commands>
+      <description>Record:</description>
+      <item>VCCV / MPLS ping status</item>
+      <item>Packet loss percentage and round-trip latency</item>
+      <note>For a ps* subscriber circuit, this ARP check runs on the PE/BNG, not the local switch — see routing/arp.xml's bngSubscriberResolution section for the candidate device list and ps-number-equals-unit-number rule.</note>
+    </diagnosticOamEvidence>
+
+    <timeline>
+      <field name="First observed" />
+      <field name="Physical interface state changed" />
+      <field name="Pseudowire / VC state changed" />
+      <field name="IGP / BGP adjacency changed" />
+      <field name="Route state changed" />
+      <field name="Service restored" />
+      <field name="Provider response" />
+    </timeline>
+
+    <rootCause>
+      <field name="Root cause" />
+      <field name="Evidence" />
+      <field name="Corrective action" />
+      <field name="Preventive action" />
+    </rootCause>
+  </topic>
+</knowledgeTopic>

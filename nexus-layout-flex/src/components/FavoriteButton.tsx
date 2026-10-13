@@ -8,7 +8,7 @@ import { toast } from "@/hooks/use-toast";
 interface FavoriteButtonProps {
   customerId: string;
   customerName: string;
-  customerType: "DIA" | "IPT" | "Shared";
+  customerType: "DIA" | "IPT" | "Shared" | "L3VPN" | "FTTH" | "L2VPN";
   interface?: string;
   cid?: string;
   nbr?: string;

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juniper Interface Flapping Troubleshooting
+-->
+<knowledgeTopic>
+  <topic id="interface-flapping" title="Juniper Interface Flapping Troubleshooting" category="interface">
+    <symptom>An interface repeatedly changes between up and down.</symptom>
+
+    <commands>
+      <command>show interfaces &lt;interface&gt; | match flap</command>
+      <command>show interfaces diagnostics optics &lt;interface&gt;</command>
+      <command>show interfaces &lt;interface&gt; extensive</command>
+    </commands>
+
+
+    <investigate>
+      <item>Input/output errors</item>
+      <item>CRC/FCS errors</item>
+      <item>Optical receive/transmit power</item>
+      <item>Link-state transitions</item>
+      <item>Cable and patching</item>
+      <item>Remote device logs</item>
+      <item>Speed/FEC compatibility</item>
+      <item>Physical movement or unstable power</item>
+    </investigate>
+
+    <diagnosis>Frequent link transitions normally indicate a physical-layer problem unless logs show a configuration or protocol event.</diagnosis>
+
+    <correctiveActions>
+      <item>Reseat or replace optic</item>
+      <item>Replace patch lead</item>
+      <item>Verify remote port</item>
+      <item>Correct speed/FEC</item>
+      <item>Check fiber cleanliness and levels</item>
+      <item>Replace hardware when evidence supports failure</item>
+    </correctiveActions>
+
+    <warning>Do not immediately clear counters or reboot equipment before collecting evidence.</warning>
+  </topic>
+</knowledgeTopic>

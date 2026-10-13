@@ -25,7 +25,7 @@ const DiaCustomer = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [pageSize, setPageSize] = useState(5);
-  const { state: authState } = useAuthContext();
+  const { state: authState, isAdmin } = useAuthContext();
 
   const initialNbr = locationState?.nbr || "";
   const [nbrSearch, setNbrSearch] = useState(initialNbr);
@@ -96,6 +96,25 @@ const DiaCustomer = () => {
     setPage(1);
   };
 
+  const handleToggleHighProfile = async (customer, checked) => {
+    setCustomers((prev) =>
+      prev.map((c) => (c.id === customer.id ? { ...c, isHighProfile: checked } : c))
+    );
+    try {
+      const token = localStorage.getItem("userToken");
+      await axios.patch(
+        `${PRODUCTION_URL}/customers/${customer.id}/high-profile`,
+        { isHighProfile: checked },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error("Failed to update high profile flag:", error);
+      setCustomers((prev) =>
+        prev.map((c) => (c.id === customer.id ? { ...c, isHighProfile: !checked } : c))
+      );
+    }
+  };
+
   const formatRemainingTime = (expiresAt) => {
     if (!expiresAt) return "No expiry";
 
@@ -147,6 +166,22 @@ const DiaCustomer = () => {
       label: "PE||BNG",
       render: (customer) => customer?.diacustomer?.switchName,
     },
+    ...(isAdmin()
+      ? [
+          {
+            key: "isHighProfile",
+            label: "High Profile",
+            render: (customer) => (
+              <input
+                type="checkbox"
+                checked={!!customer?.isHighProfile}
+                onChange={(e) => handleToggleHighProfile(customer, e.target.checked)}
+                className="h-4 w-4 cursor-pointer"
+              />
+            ),
+          },
+        ]
+      : []),
   ];
   const Action = (customer) => (
     <>

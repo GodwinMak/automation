@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { PRODUCTION_URL } from "@/utils/Api";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Loader2, Send, Users, Phone, Plus, X, History, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
+import { Loader2, Send, Users, Phone, Plus, X, History, CheckCircle2, XCircle, RefreshCw, Upload, ListChecks } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 type Recipient = {
   customerID: string;
@@ -28,10 +30,19 @@ type Campaign = {
   id: string;
   customerType: string;
   message: string;
+  status?: "queued" | "sending" | "completed" | "failed";
+  errorMessage?: string | null;
   totalSent: number;
   customerCount: number;
   extraCount: number;
   createdAt: string;
+};
+
+const CAMPAIGN_STATUS_STYLES: Record<string, string> = {
+  queued: "bg-muted text-muted-foreground",
+  sending: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  completed: "bg-green-500/15 text-green-600 dark:text-green-400",
+  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 
 type DlrSummary = {
@@ -52,6 +63,7 @@ const CUSTOMER_TYPES = [
 ];
 
 const SmsBroadcast = () => {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"compose" | "history">("compose");
 
   // --- Compose tab state ---
@@ -69,6 +81,10 @@ const SmsBroadcast = () => {
   const [extraInputError, setExtraInputError] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
+  const [uploadingList, setUploadingList] = useState(false);
+  const [uploadListInfo, setUploadListInfo] = useState<string | null>(null);
+  const [uploadListError, setUploadListError] = useState<string | null>(null);
+  const uploadListInputRef = useRef<HTMLInputElement>(null);
 
   // --- History tab state ---
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -161,6 +177,38 @@ const SmsBroadcast = () => {
     setExtraNumbers((prev) => prev.filter((n) => n !== num));
   };
 
+  // Upload an Excel file with a "Customer ID" column and select only those
+  // recipients (from the currently loaded list) that appear in the file.
+  const handleUploadList = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingList(true);
+    setUploadListInfo(null);
+    setUploadListError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await axios.post(`${PRODUCTION_URL}/sms/select-from-file`, formData, {
+        withCredentials: true,
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const fileIds: string[] = res.data.customerIDs || [];
+      const fileIdSet = new Set(fileIds);
+      const matched = recipients.filter((r) => fileIdSet.has(r.customerID));
+      setSelectedIds(new Set(matched.map((r) => r.customerID)));
+      const notFound = fileIds.length - matched.length;
+      setUploadListInfo(
+        `Selected ${matched.length} of ${fileIds.length} customer ID${fileIds.length !== 1 ? "s" : ""} from file` +
+          (notFound > 0 ? ` (${notFound} not found in the current list).` : ".")
+      );
+    } catch (err: any) {
+      setUploadListError(err?.response?.data?.error || "Failed to process file.");
+    } finally {
+      setUploadingList(false);
+    }
+  };
+
   const handleSend = async () => {
     setConfirmOpen(false);
     setSending(true);
@@ -174,7 +222,12 @@ const SmsBroadcast = () => {
           customerType,
           message: message.trim(),
           extraNumbers,
-          specificNumbers: selectedRecipients.map((r) => r.homeNumber),
+          specificRecipients: selectedRecipients.map((r) => ({
+            customerId: r.customerID,
+            customerName: r.customerName,
+            customerType: "FTTH",
+            phoneNumber: r.homeNumber,
+          })),
         },
         { withCredentials: true }
       );
@@ -309,7 +362,34 @@ const SmsBroadcast = () => {
                 >
                   Deselect all
                 </Button>
+                <input
+                  ref={uploadListInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={handleUploadList}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 shrink-0"
+                  disabled={uploadingList}
+                  onClick={() => uploadListInputRef.current?.click()}
+                >
+                  {uploadingList ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  Upload list
+                </Button>
               </div>
+            )}
+
+            {(uploadListInfo || uploadListError) && (
+              <p className={`text-xs ${uploadListError ? "text-red-500" : "text-muted-foreground"}`}>
+                {uploadListError || uploadListInfo}
+              </p>
             )}
 
             {!loadingPreview && recipients.length > 0 && (
@@ -432,23 +512,41 @@ const SmsBroadcast = () => {
               {campaigns.map((c) => (
                 <div key={c.id} className="flex items-start justify-between px-4 py-3 gap-4 bg-background hover:bg-muted/30 transition-colors">
                   <div className="space-y-0.5 min-w-0">
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
                       {new Date(c.createdAt).toLocaleString()} · {c.customerType.toUpperCase()}
+                      {c.status && (
+                        <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${CAMPAIGN_STATUS_STYLES[c.status] || ""}`}>
+                          {c.status}
+                        </Badge>
+                      )}
                     </p>
                     <p className="text-sm font-medium truncate max-w-xs">{c.message}</p>
                     <p className="text-xs text-muted-foreground">
                       {c.totalSent} sent ({c.customerCount} customers
                       {c.extraCount > 0 ? ` + ${c.extraCount} extra` : ""})
                     </p>
+                    {c.status === "failed" && c.errorMessage && (
+                      <p className="text-xs text-red-500">{c.errorMessage}</p>
+                    )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 gap-1 text-xs"
-                    onClick={() => handleCheckDelivery(c.id)}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />Delivery Report
-                  </Button>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1 text-xs"
+                      onClick={() => handleCheckDelivery(c.id)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />Delivery Report
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1 text-xs"
+                      onClick={() => navigate(`/sms-broadcast/delivery-report/${c.id}`)}
+                    >
+                      <ListChecks className="h-3.5 w-3.5" />Full Report
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -495,7 +593,7 @@ const SmsBroadcast = () => {
             <div className="space-y-3 py-2">
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "Recipients Sent", value: result.sent },
+                  { label: "Recipients Queued", value: result.queued ?? result.sent },
                   { label: "Customers Found", value: result.customerCount },
                   { label: "Manually Added", value: result.extraCount ?? 0 },
                 ].map(({ label, value }) => (
@@ -506,7 +604,7 @@ const SmsBroadcast = () => {
                 ))}
               </div>
               <p className="text-sm text-muted-foreground">{result.message}</p>
-              <p className="text-xs text-muted-foreground">Check the <strong>History</strong> tab in ~5 minutes to view delivery status.</p>
+              <p className="text-xs text-muted-foreground">Sending happens in the background. Check the <strong>History</strong> tab shortly to see it appear, then again in ~5 minutes for delivery status.</p>
             </div>
           ) : null}
           <DialogFooter>

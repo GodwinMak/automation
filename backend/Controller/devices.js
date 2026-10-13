@@ -3,6 +3,21 @@ const db = require("../Models")
 // const data = require("../devices.json")
 const { Client } = require("ssh2");
 const ip = require("ip");
+// const { enqueueEvent } = require("../utils/warehouseSpool");
+
+// Devices are a slowly-changing dimension (only added/removed on network
+// expansion or site decommission), so we push to the warehouse on CRUD
+// change rather than polling like the DIA/IPT/FTTH/etc. feeds.
+// const enqueueDeviceEvent = (device, deletedAt = null) => {
+//   enqueueEvent("DEVICE", device.id, {
+//     id: device.id,
+//     ip: device.ip,
+//     name: device.name,
+//     lat: device.lat,
+//     long: device.long,
+//     deletedAt,
+//   });
+// };
 
 
 const Device = db.devices;
@@ -20,6 +35,7 @@ exports.createDevice = async (req, res) => {
             return res.status(400).json({ message: "Device with this IP already exists" });
         }
         const newDevice = await Device.create({ ip, name });
+        // enqueueDeviceEvent(newDevice);
         res.status(201).json(newDevice);
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
@@ -43,6 +59,7 @@ exports.createDevicesBulk = async (req, res) => {
                 return res.status(400).json({ message: `Device with IP ${ip} already exists` });
             }
             const newDevice = await Device.create({ ip, name });
+            // enqueueDeviceEvent(newDevice);
             createdDevices.push(newDevice);
         }
         res.status(201).json(createdDevices);
@@ -81,6 +98,19 @@ exports.getAllDevices = async (req, res) => {
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+// get single device by ip
+exports.getDeviceByIp = async (req, res) => {
+    const { ip } = req.params;
+    try {
+        const device = await Device.findOne({ where: { ip } });
+        if (!device) {
+            return res.status(404).json({ message: "Device not found" });
+        }
+        res.status(200).json(device);
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+}
 // get single device
 exports.getDeviceById = async (req, res) => {
     const { id } = req.params;
@@ -106,6 +136,7 @@ exports.updateDevice = async (req, res) => {
         if (ip) device.ip = ip;
         if (name) device.name = name;
         await device.save();
+        // enqueueDeviceEvent(device);
         res.status(200).json(device);
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
@@ -120,6 +151,7 @@ exports.deleteDevice = async (req, res) => {
             return res.status(404).json({ message: "Device not found" });
         }
         await device.destroy();
+        // enqueueDeviceEvent(device, new Date());
         res.status(200).json({ message: "Device deleted successfully" });
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });

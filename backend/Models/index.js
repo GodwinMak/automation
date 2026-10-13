@@ -5,6 +5,7 @@ const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
   host: dbConfig.HOST,
   dialect: dbConfig.dialect,
   operatorsAliases: false,
+  logging: false,
   pool: {
     max: dbConfig.pool.max,
     min: dbConfig.pool.min,
@@ -43,6 +44,8 @@ db.ftthReports = require("./ftthReport.js")(sequelize, DataTypes);
 db.users = require("./user.js")(sequelize, DataTypes);
 db.configurationdata = require("./configurationdata.js")(sequelize, DataTypes);
 db.upgradeinfos = require("./upgradeinfo.js")(sequelize, DataTypes);
+db.iptupgradeinfos = require("./iptupgradeinfo.js")(sequelize, DataTypes);
+db.l3vpnupgradeinfos = require("./l3vpnupgradeinfo.js")(sequelize, DataTypes);
 db.client_dbs = require("./client_db")(sequelize, DataTypes);
 db.favorites = require("./favorite.js")(sequelize, DataTypes);
 db.uptimehistories = require("./uptimeHistory.js")(sequelize, DataTypes);
@@ -54,8 +57,21 @@ db.diaOverusageReports = require("./diaOverusageReport.js")(sequelize, DataTypes
 db.pitchForUpgradeReports = require("./pitchForUpgradeReport.js")(sequelize, DataTypes);
 db.switchConfiguration = require("./switchConfiguration.js")(sequelize, DataTypes);
 db.isisAdjacency = require("./isisAdjacent.js")(sequelize, DataTypes);
+db.isisWatchlist = require("./isisWatchlist.js")(sequelize, DataTypes);
 db.push_tokens = require("./pushToken.js")(sequelize, DataTypes);
 db.smsCampaigns = require("./smsCampaign.js")(sequelize, DataTypes);
+db.smsDeliveryReports = require("./smsDeliveryReport.js")(sequelize, DataTypes);
+db.emailCampaigns = require("./emailCampaign.js")(sequelize, DataTypes);
+db.massOutageIncidents = require("./massOutageIncident.js")(sequelize, DataTypes);
+db.massOutageIncidentCustomers = require("./massOutageIncidentCustomer.js")(sequelize, DataTypes);
+db.cronJobRuns = require("./cronJobRun.js")(sequelize, DataTypes);
+db.l2vpninterfaces = require("./l2vpnInterface.js")(sequelize, DataTypes);
+db.l2vpncircuits = require("./l2vpnCircuit.js")(sequelize, DataTypes);
+db.l2vpndeviceskips = require("./l2vpnDeviceSkip.js")(sequelize, DataTypes);
+db.l2vpnvplsids = require("./l2vpnVplsId.js")(sequelize, DataTypes);
+db.networkMaps = require("./networkMap.js")(sequelize, DataTypes);
+db.networkMapNodes = require("./networkMapNode.js")(sequelize, DataTypes);
+db.networkMapLinks = require("./networkMapLink.js")(sequelize, DataTypes);
 
 
 
@@ -183,6 +199,28 @@ db.upgradeinfos.belongsTo(db.customerinfos,{
   onDelete: "CASCADE",
 })
 
+db.iptcustomerinfos.hasMany(db.iptupgradeinfos,{
+  foreignKey: "interface",
+  sourceKey: "interface",
+  onDelete: "CASCADE",
+})
+db.iptupgradeinfos.belongsTo(db.iptcustomerinfos,{
+  foreignKey: "interface",
+  targetKey: "interface",
+  onDelete: "CASCADE",
+})
+
+db.l3vpncustomerinfos.hasMany(db.l3vpnupgradeinfos,{
+  foreignKey: "interface",
+  sourceKey: "interface",
+  onDelete: "CASCADE",
+})
+db.l3vpnupgradeinfos.belongsTo(db.l3vpncustomerinfos,{
+  foreignKey: "interface",
+  targetKey: "interface",
+  onDelete: "CASCADE",
+})
+
 // User <-> Notifications
 db.users.hasMany(db.notifications, {
   foreignKey: "userId",
@@ -218,14 +256,118 @@ db.isisAdjacency.belongsTo(db.devices, {
   foreignKey: "local_device_id",
 });
 
+// User <-> ISIS Watch List
+db.users.hasMany(db.isisWatchlist, {
+  foreignKey: "userId",
+  onDelete: "CASCADE",
+});
+db.isisWatchlist.belongsTo(db.users, {
+  foreignKey: "userId",
+});
+
 db.users.hasMany(db.push_tokens, { foreignKey: "user_id" });
 db.push_tokens.belongsTo(db.users, { foreignKey: "user_id" });
 
+// Mass Outage Incident <-> Members
+db.massOutageIncidents.hasMany(db.massOutageIncidentCustomers, {
+  foreignKey: "incidentId",
+  as: "members",
+  onDelete: "CASCADE",
+});
+db.massOutageIncidentCustomers.belongsTo(db.massOutageIncidents, {
+  foreignKey: "incidentId",
+  as: "incident",
+});
+
+// SMS Campaign <-> per-recipient Delivery Reports
+db.smsCampaigns.hasMany(db.smsDeliveryReports, {
+  foreignKey: "campaignId",
+  as: "deliveryReports",
+  onDelete: "CASCADE",
+});
+db.smsDeliveryReports.belongsTo(db.smsCampaigns, {
+  foreignKey: "campaignId",
+  as: "campaign",
+});
+
+// L2VPN Interface <-> Devices
+db.devices.hasMany(db.l2vpninterfaces, {
+  foreignKey: "deviceId",
+  onDelete: "CASCADE",
+});
+db.l2vpninterfaces.belongsTo(db.devices, {
+  foreignKey: "deviceId",
+});
+
+// L2VPN Interface <-> Circuit detail
+db.l2vpninterfaces.hasOne(db.l2vpncircuits, {
+  foreignKey: "l2vpnInterfaceId",
+  onDelete: "CASCADE",
+});
+db.l2vpncircuits.belongsTo(db.l2vpninterfaces, {
+  foreignKey: "l2vpnInterfaceId",
+});
+
+// L2VPN Device skip cache (6-hour "no L2VPN customers" cooldown)
+db.devices.hasOne(db.l2vpndeviceskips, {
+  foreignKey: "deviceId",
+  onDelete: "CASCADE",
+});
+db.l2vpndeviceskips.belongsTo(db.devices, {
+  foreignKey: "deviceId",
+});
+
+// L2VPN VPLS mesh-group vpls-ids known on a PE device
+db.devices.hasMany(db.l2vpnvplsids, {
+  foreignKey: "deviceId",
+  onDelete: "CASCADE",
+});
+db.l2vpnvplsids.belongsTo(db.devices, {
+  foreignKey: "deviceId",
+});
+
+// Admin-curated Network Maps
+db.networkMaps.hasMany(db.networkMapNodes, {
+  foreignKey: "mapId",
+  onDelete: "CASCADE",
+  as: "nodes",
+});
+db.networkMapNodes.belongsTo(db.networkMaps, {
+  foreignKey: "mapId",
+});
+
+db.networkMaps.hasMany(db.networkMapLinks, {
+  foreignKey: "mapId",
+  onDelete: "CASCADE",
+  as: "links",
+});
+db.networkMapLinks.belongsTo(db.networkMaps, {
+  foreignKey: "mapId",
+});
+
+db.users.hasMany(db.networkMaps, {
+  foreignKey: "createdBy",
+});
+db.networkMaps.belongsTo(db.users, {
+  foreignKey: "createdBy",
+  as: "creator",
+});
+
 db.sequelize
   .sync({ force: false })
-  .then(() => {})
   .then(() => {
     console.log("Yes re-sync done.");
+  })
+  .catch((err) => {
+    // Models/index.js is required by every process (server.js AND every
+    // cron-worker fork via cron-runner.js) — before this catch existed, any
+    // sync failure here (e.g. a model index whose auto-generated name
+    // exceeds MySQL's 64-char identifier limit) became an unhandled promise
+    // rejection, which crashes the entire process under Node's default
+    // behavior. Logging instead of crashing means one bad model definition
+    // can't take down the whole app; the rest of sync (and the app) still
+    // runs against whatever schema state already exists.
+    console.error("[Models] sequelize.sync() failed:", err.message);
   });
 
 module.exports = db;

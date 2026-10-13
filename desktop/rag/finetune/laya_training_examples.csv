@@ -1,0 +1,141 @@
+message,category
+"get the full configuration of interface ge-0/0/12 on 10.20.1.5",config
+"show me the config for vlan 2859 on LTZ-ACC2-RAH",config
+"confirm the configuration on unit 544 of ge-0/0/3, device 10.10.5.2",config
+"search the config of 10.20.1.5 for anything mentioning routing-instance CUSTOMER-VRF",config
+"what's the current config on interface xe-0/1/0.100 on 10.30.2.1",config
+"can you verify the vlan tagging config on 10.20.4.9",config
+"pull the full config for 10.0.0.14",config
+"check if BGP is configured on interface ge-0/0/45 at 10.20.9.3",config
+"get the l2circuit config for interface ge-0/0/10 on 10.30.2.1",config
+"show the config of routing-instance L3VPN-ACME on 10.20.1.9",config
+"kindly confirm the description set on ge-0/0/22, device 10.30.5.6",config
+"search switch config on 10.10.10.5 for mac-limit settings",config
+"get interface config for xe-0/0/1 unit 0 on 10.40.2.2",config
+"what is configured under unit 100 on ge-0/0/8, 10.20.7.1",config
+"confirm the OSPF area configuration on 10.30.1.4",config
+"show configuration for irb.200 on 10.20.3.8",config
+"please verify the static route entries on 10.10.20.2",config
+"get the full config dump for 10.40.4.4",config
+"search for vlan-id 3011 in the config of 10.20.6.7",config
+"confirm the firewall filter applied on ge-0/0/33, 10.30.8.9",config
+"kinlly check hardware status of LTZ-P1-SEA",live
+"is interface ge-0/0/12 up on 10.20.1.5",live
+"ping 10.20.1.5 from the core",live
+"run a traceroute to 10.30.4.2",live
+"check chassis alarms on LTZ-ACC1-DSM",live
+"show me the optics power levels on ge-0/0/3, 10.10.5.2",live
+"what's the current status of interface xe-0/1/0 on 10.40.2.2",live
+"check environment/temperature on LTZ-P2-NBO",live
+"is 10.20.9.3 reachable right now",live
+"show chassis hardware for 10.30.5.6",live
+"check for any active alarms on 10.10.10.5",live
+"run show interfaces terse on 10.20.7.1",live
+"ping 10.30.1.4 rapid count 20",live
+"check the current BGP neighbor state on 10.20.1.9",live
+"is the power supply ok on LTZ-CORE-MSA",live
+"show interfaces descriptions on 10.40.4.4 and check ge-0/0/8",live
+"run a live ping test to 10.20.6.7",live
+"check real time status of the l2circuit on 10.30.8.9",live
+"verify link status between 10.20.1.5 and 10.20.1.9 right now",live
+"check fan and psu status on LTZ-P1-SEA",live
+"how do I diagnose a DIA circuit that keeps flapping",knowledge
+"what's the procedure for troubleshooting an L3VPN customer",knowledge
+"how do I configure a new L2VPN circuit on Junos",knowledge
+"what steps should I follow for an FTTH diagnosis",knowledge
+"explain how BFD works on Junos",knowledge
+"what is the runbook for IPT customer troubleshooting",knowledge
+"how do I set up a new routing-instance for a VRF customer",knowledge
+"what commands do I use to check MPLS LSP status",knowledge
+"how do I provision a new ge interface for a customer",knowledge
+"what's the standard procedure when a customer reports high latency",knowledge
+"how do I troubleshoot OSPF adjacency issues",knowledge
+"what's the correct way to configure a firewall filter on Junos",knowledge
+"how do I diagnose a circuit with intermittent packet loss",knowledge
+"what is the documented process for checking VLAN mismatches",knowledge
+"how do I verify BGP route propagation",knowledge
+"what's the runbook for checking a down neighbor link",knowledge
+"how do I configure link aggregation on Junos",knowledge
+"what steps do I follow to provision a new DIA customer",knowledge
+"how do I check for duplicate IP conflicts",knowledge
+"what's the procedure for a scheduled maintenance on a core device",knowledge
+"actually that CID is L3VPN, not L2VPN",correction
+"no, the correct routing-instance name is CUSTOMER-VRF-2, not CUSTOMER-VRF",correction
+"that's wrong, the interface is ge-0/0/14 not ge-0/0/12",correction
+"correction: the device is 10.20.1.9, not 10.20.1.5",correction
+"the previous answer was incorrect, the VLAN id is actually 3011",correction
+"please update, this customer is on FTTH not shared",correction
+"you got the device name wrong, it's LTZ-ACC2-RAH not LTZ-ACC1-RAH",correction
+"that's not right, the circuit is up now, I just checked",correction
+"the real CID format for this customer is LHTZ-5812",correction
+"correction, the routing-instance uses OSPF not BGP",correction
+"actually I was wrong earlier, please disregard my last message",correction
+"the config you showed is outdated, here is the current version",correction
+"that interface description is incorrect, it should say Uplink-to-Core2",correction
+"no that's a different customer, disregard the previous match",correction
+"the real IP for this device is 10.30.5.6, not 10.30.5.9",correction
+"I made a mistake earlier, the VRF name is correct as ACME-VRF",correction
+"please note, PPPoE username lookup works better than CID for FTTH",correction
+"correction: this alarm was already cleared, ignore my earlier report",correction
+"the previous config I pasted was from a different device, ignore it",correction
+"actually confirmed, this circuit type is IPT not DIA",correction
+"find customer LHTZ-5812",customer_lookup
+"where is this customer located, account number ACME-4471",customer_lookup
+"look up the circuit for john.doe@example.com",customer_lookup
+"search for customer by phone number 0712345678",customer_lookup
+"find the CID for Acme Corp",customer_lookup
+"which device is customer XYZ-9981 connected to",customer_lookup
+"search customers for Sarah Mwangi",customer_lookup
+"find the circuit details for CID LHTZ-2201",customer_lookup
+"look up account 55231 and tell me their service type",customer_lookup
+"where is customer TechHub Ltd provisioned",customer_lookup
+"search for customer using PPPoE username techhub01",customer_lookup
+"find all circuits under account number 88213",customer_lookup
+"which interface serves customer Nairobi Data Center",customer_lookup
+"look up customer by email support@acmecorp.com",customer_lookup
+"find the CID matching phone 0798765432",customer_lookup
+"search for customer account KenyaNet-334",customer_lookup
+"where is CID LHTZ-7765 terminated",customer_lookup
+"find customer details for Green Valley Farms",customer_lookup
+"look up which device hosts circuit ID DIA-4402",customer_lookup
+"search for the customer tied to interface ge-0/0/22 on 10.30.5.6",customer_lookup
+"show me the downtime history for CID LHTZ-5812 last month",warehouse_query
+"what's the current status of this circuit",warehouse_query
+"check the stability trend for customer ACME-4471",warehouse_query
+"how many times has this circuit gone down this week",warehouse_query
+"show the status change history for account 55231",warehouse_query
+"what's the churn risk score for customer TechHub Ltd",warehouse_query
+"check the uptime trend for CID LHTZ-2201 over the last 30 days",warehouse_query
+"show current operational status for interface ge-0/0/22",warehouse_query
+"how long has this circuit been down",warehouse_query
+"get the link history for the last 7 days on this customer",warehouse_query
+"what's the average downtime for account 88213",warehouse_query
+"check current status for CID DIA-4402",warehouse_query
+"show me the pattern of outages for this customer by hour",warehouse_query
+"what's the stability score trend for KenyaNet-334",warehouse_query
+"how many status changes has this circuit had this month",warehouse_query
+"check the extended downtime report for unstable customers",warehouse_query
+"show the metric trend for latency on this circuit",warehouse_query
+"what's the current status of customer Green Valley Farms",warehouse_query
+"get the history of up/down changes for this account",warehouse_query
+"check if this customer is flagged as high churn risk",warehouse_query
+"hello, are you there",other
+"thank you for the help earlier",other
+"can you make the responses shorter",other
+"what can you help me with",other
+"good morning",other
+"how are you today",other
+"can you export this conversation",other
+"what tools do you have access to",other
+"is there a dark mode for this app",other
+"can you remember what I asked yesterday",other
+"thanks, that solved it",other
+"how do I add a new device to the system",other
+"can I get a summary of everything we discussed",other
+"is there a way to increase the tool call timeout",other
+"what version of this assistant am I using",other
+"can you help me write an email to my manager",other
+"how do I clear my chat history",other
+"can you explain what LIT Terminal does",other
+"is this conversation saved anywhere",other
+"can you give me a list of all customers in the system",other

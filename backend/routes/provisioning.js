@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { configureCustomer } = require("../confgTempeletGenerator/diaNoTagGenerator");
 const { pushDiaWithTagConfig, previewDiaWithTagConfig } = require("../confgTempeletGenerator/diaWithTagGenerator");
+const { pushGponOverEnterpriseConfig, previewGponOverEnterpriseConfig } = require("../confgTempeletGenerator/gponOverEnterpriseGenerator");
 const { verifyToken, requirePermission } = require("../middleware/auth");
 
 /**
@@ -157,6 +158,7 @@ router.post("/preview", verifyToken, requirePermission("canConfigureCustomers"),
     `set interfaces ${metroIntf} gigether-options auto-negotiation`,
     `set interfaces ${metroIntf} unit 0 description "{cat=DIA|nbr=${nbrDescription}|Customer=${customerName}|cid=${cidForMetroDescription}|Mbps=${mbps}}"`,
     `set interfaces ${metroIntf} unit 0 statistics`,
+    `set interfaces ${metroIntf} unit 0 family ccc`,
     `set protocols l2circuit neighbor ${primaryPe.host} interface ${metroIntf}.0 virtual-circuit-id ${vcId}`,
     `set protocols l2circuit neighbor ${primaryPe.host} interface ${metroIntf}.0 control-word`,
     `set protocols l2circuit neighbor ${primaryPe.host} interface ${metroIntf}.0 mtu 1500`,
@@ -261,10 +263,11 @@ router.post("/dia-with-tag", verifyToken, requirePermission("canConfigureCustome
     cid,
     mbps,
     wanIp,
+    sharedPort,
     username,
     password
   } = req.body;
-  
+
   console.log(`\n[PROVISION] ===== Request Parameters (WITH TAG) =====`);
   console.log(`[PROVISION] Metro Switch: ${metroSwitch?.name} (${metroSwitch?.host})`);
   console.log(`[PROVISION] Metro Interface: ${metroIntf}`);
@@ -293,10 +296,11 @@ router.post("/dia-with-tag", verifyToken, requirePermission("canConfigureCustome
       cid,
       mbps,
       wanIp,
+      sharedPort,
       username,
       password
     });
-    
+
     if (result.success) {
       console.log(`[PROVISION] ✅ DIA WITH TAG configuration successful`);
       res.json(result);
@@ -336,9 +340,10 @@ router.post("/preview-with-tag", verifyToken, requirePermission("canConfigureCus
     customerName,
     cid,
     mbps,
-    wanIp
+    wanIp,
+    sharedPort
   } = req.body;
-  
+
   console.log(`\n[PREVIEW] ===== Request Parameters (WITH TAG) =====`);
   console.log(`[PREVIEW] Metro Switch: ${metroSwitch?.name} (${metroSwitch?.host})`);
   console.log(`[PREVIEW] Metro Interface: ${metroIntf}`);
@@ -388,9 +393,10 @@ router.post("/preview-with-tag", verifyToken, requirePermission("canConfigureCus
       customerName,
       cid,
       mbps,
-      wanIp
+      wanIp,
+      sharedPort
     });
-    
+
     console.log(`\n[PREVIEW] ===== Preview Generation Complete (WITH TAG) =====`);
     console.log(`[PREVIEW] Metro commands: ${preview.metro.commands.length}`);
     preview.pe.forEach((pe, idx) => {
@@ -398,6 +404,183 @@ router.post("/preview-with-tag", verifyToken, requirePermission("canConfigureCus
     });
     console.log(`[PREVIEW] ========================================================\n`);
     
+    res.json({ preview });
+  } catch (error) {
+    console.error(`[PREVIEW] ❌ Error generating preview: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ============================================================================
+ * GPON OVER ENTERPRISE ROUTES
+ * ============================================================================
+ */
+
+/**
+ * @route   POST /provisioning/gpon-enterprise
+ * @desc    Configure GPON over Enterprise customer circuit
+ * @access  Private (requires SSH credentials + canConfigureCustomers permission)
+ */
+router.post("/gpon-enterprise", verifyToken, requirePermission("canConfigureCustomers"), async (req, res) => {
+  console.log(`\n`);
+  console.log(`[PROVISION] ================================================`);
+  console.log(`[PROVISION] GPON OVER ENTERPRISE Configuration Request Received`);
+  console.log(`[PROVISION] User: ${req.user?.username || 'Unknown'} (${req.user?.role || 'Unknown'})`);
+  console.log(`[PROVISION] Timestamp: ${new Date().toISOString()}`);
+  console.log(`[PROVISION] ================================================`);
+
+  const {
+    accessSwitch,
+    accessIntf,
+    bngDevices,
+    psUnit,
+    vlanId,
+    anchorPoint,
+    profilePrefix,
+    accountName,
+    accountNumber,
+    cid,
+    mtu,
+    username,
+    password
+  } = req.body;
+
+  console.log(`\n[PROVISION] ===== Request Parameters (GPON OVER ENTERPRISE) =====`);
+  console.log(`[PROVISION] Access Switch: ${accessSwitch?.name} (${accessSwitch?.host})`);
+  console.log(`[PROVISION] Access Interface: ${accessIntf}`);
+  console.log(`[PROVISION] PS Unit: ${psUnit}`);
+  console.log(`[PROVISION] VLAN ID: ${vlanId}`);
+  console.log(`[PROVISION] Profile Prefix: ${profilePrefix}`);
+  console.log(`[PROVISION] Account: ${accountName} (${accountNumber})`);
+  console.log(`[PROVISION] CID: ${cid}`);
+  console.log(`[PROVISION] BNG Devices: ${bngDevices?.length || 0}`);
+  bngDevices?.forEach((bng, idx) => {
+    console.log(`[PROVISION]   ${idx + 1}. ${bng.name} (${bng.host})`);
+  });
+  console.log(`[PROVISION] ==========================================================\n`);
+
+  try {
+    const result = await pushGponOverEnterpriseConfig({
+      accessSwitch,
+      accessIntf,
+      bngDevices,
+      psUnit,
+      vlanId,
+      anchorPoint: anchorPoint || "lt-0/0/0",
+      profilePrefix,
+      accountName,
+      accountNumber,
+      cid,
+      mtu: mtu || "1532",
+      username,
+      password
+    });
+
+    if (result.success) {
+      console.log(`[PROVISION] ✅ GPON OVER ENTERPRISE configuration successful`);
+      res.json(result);
+    } else {
+      console.error(`[PROVISION] ❌ GPON OVER ENTERPRISE configuration failed: ${result.message}`);
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error(`[PROVISION] ❌ Error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /provisioning/preview-gpon-enterprise
+ * @desc    Preview GPON over Enterprise configuration commands without pushing
+ * @access  Private (requires canConfigureCustomers permission)
+ */
+router.post("/preview-gpon-enterprise", verifyToken, requirePermission("canConfigureCustomers"), (req, res) => {
+  console.log(`\n`);
+  console.log(`[PREVIEW] ================================================`);
+  console.log(`[PREVIEW] GPON OVER ENTERPRISE Preview Request`);
+  console.log(`[PREVIEW] User: ${req.user?.username || 'Unknown'} (${req.user?.role || 'Unknown'})`);
+  console.log(`[PREVIEW] Timestamp: ${new Date().toISOString()}`);
+  console.log(`[PREVIEW] ================================================`);
+
+  const {
+    accessSwitch,
+    accessIntf,
+    bngDevices,
+    psUnit,
+    vlanId,
+    anchorPoint,
+    profilePrefix,
+    accountName,
+    accountNumber,
+    cid,
+    mtu
+  } = req.body;
+
+  console.log(`\n[PREVIEW] ===== Request Parameters (GPON OVER ENTERPRISE) =====`);
+  console.log(`[PREVIEW] Access Switch: ${accessSwitch?.name} (${accessSwitch?.host})`);
+  console.log(`[PREVIEW] Access Interface: ${accessIntf}`);
+  console.log(`[PREVIEW] PS Unit: ${psUnit}`);
+  console.log(`[PREVIEW] VLAN ID: ${vlanId}`);
+  console.log(`[PREVIEW] Profile Prefix: ${profilePrefix}`);
+  console.log(`[PREVIEW] Account: ${accountName} (${accountNumber})`);
+  console.log(`[PREVIEW] CID: ${cid}`);
+  console.log(`[PREVIEW] BNG Devices: ${bngDevices?.length || 0}`);
+  bngDevices?.forEach((bng, idx) => {
+    console.log(`[PREVIEW]   ${idx + 1}. ${bng.name} (${bng.host})`);
+  });
+  console.log(`[PREVIEW] ==========================================================\n`);
+
+  if (!accessSwitch?.name || !accessSwitch?.host) {
+    return res.status(400).json({ message: "Access Switch is required" });
+  }
+  if (!accessIntf) {
+    return res.status(400).json({ message: "Access Switch interface is required" });
+  }
+  if (!bngDevices || bngDevices.length < 2) {
+    return res.status(400).json({ message: "At least 2 BNG devices are required" });
+  }
+  if (!psUnit) {
+    return res.status(400).json({ message: "PS Unit number is required" });
+  }
+  if (!vlanId) {
+    return res.status(400).json({ message: "VLAN ID is required" });
+  }
+  if (!profilePrefix) {
+    return res.status(400).json({ message: "Profile prefix is required" });
+  }
+  if (!accountName || !accountNumber || !cid) {
+    return res.status(400).json({ message: "Account name, account number, and CID are required" });
+  }
+
+  try {
+    const preview = previewGponOverEnterpriseConfig({
+      accessSwitch,
+      accessIntf,
+      bngDevices,
+      psUnit,
+      vlanId,
+      anchorPoint: anchorPoint || "lt-0/0/0",
+      profilePrefix,
+      accountName,
+      accountNumber,
+      cid,
+      mtu: mtu || "1532"
+    });
+
+    console.log(`\n[PREVIEW] ===== Preview Generation Complete (GPON OVER ENTERPRISE) =====`);
+    console.log(`[PREVIEW] Access Switch commands: ${preview.accessSwitch.commands.length}`);
+    preview.bng.forEach((bng, idx) => {
+      console.log(`[PREVIEW] BNG ${idx + 1} (${bng.role}) commands: ${bng.commands.length}`);
+    });
+    console.log(`[PREVIEW] ================================================================\n`);
+
     res.json({ preview });
   } catch (error) {
     console.error(`[PREVIEW] ❌ Error generating preview: ${error.message}`);
